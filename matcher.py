@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from models import FeasibleSlot, Session
+from models import FeasibleSlot, Scene
 from time_grid import DAYS_PER_WEEK, Matrix, SLOTS_PER_DAY
 
 
@@ -36,19 +36,19 @@ def find_feasible_slots_from_common(common: Matrix, duration_slots: int) -> list
     return feasible
 
 
-def find_feasible_slots_for_session(
-    session: Session,
+def find_feasible_slots_for_scene(
+    scene: Scene,
     actor_availability: dict[str, Matrix],
 ) -> list[FeasibleSlot]:
-    matrices = [actor_availability[actor_name] for actor_name in session.actors]
+    matrices = [actor_availability[actor_name] for actor_name in scene.actors]
     common = intersect_availability(matrices)
-    return find_feasible_slots_from_common(common, session.duration_slots)
+    return find_feasible_slots_from_common(common, scene.duration_slots)
 
 
-def compute_all_session_feasibility(
-    sessions: list[Session], actor_availability: dict[str, Matrix]
+def compute_all_scene_feasibility(
+    scenes: list[Scene], actor_availability: dict[str, Matrix]
 ) -> dict[str, list[FeasibleSlot]]:
     results: dict[str, list[FeasibleSlot]] = {}
-    for session in sessions:
-        results[session.name] = find_feasible_slots_for_session(session, actor_availability)
+    for scene in scenes:
+        results[scene.name] = find_feasible_slots_for_scene(scene, actor_availability)
     return results

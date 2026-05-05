@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from loader import DataValidationError, load_actor_availability, load_sessions
-from matcher import compute_all_session_feasibility
-from models import Session
+from loader import DataValidationError, load_actor_availability, load_scenes
+from matcher import compute_all_scene_feasibility
+from models import Scene
 from time_grid import DAYS_PER_WEEK, SLOTS_PER_DAY, interval_label
 
 
@@ -25,8 +25,8 @@ class RehearsalManagementTests(unittest.TestCase):
         alice[0] = [1, 1, 0, 1, 0, 0, 0]
         bob[0] = [1, 0, 0, 1, 1, 0, 0]
 
-        sessions = [Session(name="Scene_1", actors=("Alice", "Bob"), duration_slots=1)]
-        result = compute_all_session_feasibility(sessions, {"Alice": alice, "Bob": bob})
+        scenes = [Scene(name="Scene_1", actors=("Alice", "Bob"), duration_slots=1)]
+        result = compute_all_scene_feasibility(scenes, {"Alice": alice, "Bob": bob})
 
         labels = [interval_label(s.day_index, s.start_slot, s.duration_slots) for s in result["Scene_1"]]
         self.assertEqual(labels, ["Mon 10:00-12:00", "Mon 16:00-18:00"])
@@ -36,8 +36,8 @@ class RehearsalManagementTests(unittest.TestCase):
         matrix[0] = [0, 0, 0, 0, 0, 1, 1]
         matrix[1] = [1, 1, 0, 0, 0, 0, 0]
 
-        sessions = [Session(name="Long", actors=("Alice",), duration_slots=2)]
-        result = compute_all_session_feasibility(sessions, {"Alice": matrix})
+        scenes = [Scene(name="Long", actors=("Alice",), duration_slots=2)]
+        result = compute_all_scene_feasibility(scenes, {"Alice": matrix})
 
         labels = [interval_label(s.day_index, s.start_slot, s.duration_slots) for s in result["Long"]]
         self.assertEqual(labels, ["Mon 20:00-24:00", "Tue 10:00-14:00"])
@@ -48,8 +48,8 @@ class RehearsalManagementTests(unittest.TestCase):
         alice[2][0] = 1
         bob[2][1] = 1
 
-        sessions = [Session(name="None", actors=("Alice", "Bob"), duration_slots=1)]
-        result = compute_all_session_feasibility(sessions, {"Alice": alice, "Bob": bob})
+        scenes = [Scene(name="None", actors=("Alice", "Bob"), duration_slots=1)]
+        result = compute_all_scene_feasibility(scenes, {"Alice": alice, "Bob": bob})
 
         self.assertEqual(result["None"], [])
 
@@ -63,13 +63,13 @@ class RehearsalManagementTests(unittest.TestCase):
     def test_loader_rejects_unknown_actor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             actors_path = Path(tmp) / "actors.json"
-            sessions_path = Path(tmp) / "sessions.json"
+            scenes_path = Path(tmp) / "scenes.json"
 
             actors_path.write_text(
                 json.dumps({"Alice": blank_matrix()}),
                 encoding="utf-8",
             )
-            sessions_path.write_text(
+            scenes_path.write_text(
                 json.dumps([
                     {"name": "Scene", "actors": ["Alice", "Bob"], "duration_slots": 1}
                 ]),
@@ -78,12 +78,12 @@ class RehearsalManagementTests(unittest.TestCase):
 
             actors = load_actor_availability(actors_path)
             with self.assertRaises(DataValidationError):
-                load_sessions(sessions_path, set(actors))
+                load_scenes(scenes_path, set(actors))
 
     def test_cli_human_and_json_output(self) -> None:
         root = Path(__file__).resolve().parent.parent
-        actors_path = root / "examples" / "actors.sample.json"
-        sessions_path = root / "examples" / "sessions.sample.json"
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
 
         proc_human = subprocess.run(
             [
@@ -91,8 +91,8 @@ class RehearsalManagementTests(unittest.TestCase):
                 "main.py",
                 "--actors",
                 str(actors_path),
-                "--sessions",
-                str(sessions_path),
+                "--scenes",
+                str(scenes_path),
                 "--format",
                 "human",
             ],
@@ -111,8 +111,8 @@ class RehearsalManagementTests(unittest.TestCase):
                 "main.py",
                 "--actors",
                 str(actors_path),
-                "--sessions",
-                str(sessions_path),
+                "--scenes",
+                str(scenes_path),
                 "--format",
                 "json",
             ],
@@ -125,6 +125,147 @@ class RehearsalManagementTests(unittest.TestCase):
         payload = json.loads(proc_json.stdout)
         self.assertIn("Scene_1", payload)
         self.assertIsInstance(payload["Scene_1"], list)
+
+    def test_cli_no_weekend_filter(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+                "--scenes",
+                str(scenes_path),
+                "--format",
+                "human",
+                "--no-weekend",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertNotIn("Sat ", proc.stdout)
+        self.assertNotIn("Sun ", proc.stdout)
+        self.assertIn("Fri ", proc.stdout)
+
+    def test_cli_choose_days_filter_accepts_spaced_comma_values(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+                "--scenes",
+                str(scenes_path),
+                "--format",
+                "human",
+                "--choose",
+                "Mon,",
+                "Fri",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        for line in proc.stdout.splitlines():
+            if not line.startswith("  - ") or "No feasible slots" in line:
+                continue
+            self.assertTrue(
+                "Mon " in line or "Fri " in line,
+                msg=f"unexpected day in line: {line}",
+            )
+
+    def test_cli_choose_days_filter_in_json(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+                "--scenes",
+                str(scenes_path),
+                "--format",
+                "json",
+                "--choose",
+                "Mon,Fri",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        payload = json.loads(proc.stdout)
+        for slots in payload.values():
+            for slot in slots:
+                self.assertIn(slot["day_index"], (0, 4))
+
+    def test_cli_combined_no_weekend_and_choose_intersects(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+                "--scenes",
+                str(scenes_path),
+                "--format",
+                "human",
+                "--no-weekend",
+                "--choose",
+                "Mon,Sat",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("Mon ", proc.stdout)
+        self.assertNotIn("Sat ", proc.stdout)
+
+    def test_cli_choose_days_filter_rejects_invalid_day(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+                "--scenes",
+                str(scenes_path),
+                "--choose",
+                "Funday",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("invalid day 'Funday'", proc.stderr)
 
 
 if __name__ == "__main__":

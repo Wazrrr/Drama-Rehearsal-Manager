@@ -19,8 +19,8 @@ def _slot_to_dict(slot: FeasibleSlot) -> dict[str, int | str]:
 
 def format_human_readable(results: dict[str, list[FeasibleSlot]]) -> str:
     lines: list[str] = []
-    for session_name, slots in results.items():
-        lines.append(f"{session_name}:")
+    for scene_name, slots in results.items():
+        lines.append(f"{scene_name}:")
         if not slots:
             lines.append("  - No feasible slots")
             continue
@@ -30,5 +30,5 @@ def format_human_readable(results: dict[str, list[FeasibleSlot]]) -> str:
 
 
 def format_json(results: dict[str, list[FeasibleSlot]]) -> str:
-    data = {session_name: [_slot_to_dict(slot) for slot in slots] for session_name, slots in results.items()}
+    data = {scene_name: [_slot_to_dict(slot) for slot in slots] for scene_name, slots in results.items()}
     return json.dumps(data, indent=2)

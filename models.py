@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Session:
+class Scene:
     name: str
     actors: tuple[str, ...]
     duration_slots: int = 1
