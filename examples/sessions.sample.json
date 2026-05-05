@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Scene_1",
+    "actors": ["Alice", "Bob"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene_2",
+    "actors": ["Alice", "Carol"],
+    "duration_slots": 2
+  },
+  {
+    "name": "Finale",
+    "actors": ["Alice", "Bob", "Carol"],
+    "duration_slots": 1
+  }
+]
