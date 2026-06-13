@@ -1,6 +1,9 @@
-# Rehearsal Management (Local CLI)
+# Rehearsal Management
 
-Local-only rehearsal slot matcher using actor weekly availability matrices.
+Local-only rehearsal slot matcher using actor weekly availability matrices. The project now supports both:
+
+- a tested Python CLI for scripted runs
+- a local browser app for visual editing and matching
 
 ## Time Grid
 
@@ -35,13 +38,56 @@ Reminder: `duration_slots` is the number of 2-hour slots.
 
 ## Run
 
+Use `python3` on macOS/Linux and `py -3` on Windows if `python` is not available on your PATH.
+
+### CLI
+
 ```bash
-python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --format human
-python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --format json
-python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --no-weekend
-python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --choose Mon,Fri
-python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --choose Mon, Fri
+python3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --format human
+python3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --format json
+python3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --no-weekend
+python3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --choose Mon,Fri
+python3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --choose Mon, Fri
 ```
+
+Windows:
+
+```powershell
+py -3 main.py --actors data/actors.sample.json --scenes data/scenes.sample.json --format human
+```
+
+### Web App
+
+Create and activate a virtual environment, then install dependencies.
+
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m streamlit run app.py
+```
+
+Windows PowerShell:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+py -3 -m pip install -r requirements.txt
+py -3 -m streamlit run app.py
+```
+
+The app opens in a browser and lets you:
+
+- add, rename, and delete actors
+- edit actor availability in a 7 day x 7 slot grid
+- add and edit scenes with actor pickers and duration slots
+- run the matcher with day filters
+- download actors, scenes, and result reports as JSON/text
+- save the current project to `data/actors.json` and `data/scenes.json`
+
+On startup, the app loads `data/actors.json` and `data/scenes.json` if both exist. Otherwise it loads the sample files.
 
 ## Day Filtering
 
@@ -55,5 +101,17 @@ python main.py --actors data/actors.sample.json --scenes data/scenes.sample.json
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
+
+Windows:
+
+```powershell
+py -3 -m unittest discover -s tests -v
+```
+
+## Troubleshooting
+
+- `python: command not found`: use `python3` on macOS/Linux or `py -3` on Windows.
+- `No module named streamlit`: activate the virtual environment and run `python3 -m pip install -r requirements.txt`.
+- Invalid project data: the CLI and web app both use the same validation rules, so fix the actor matrix shape, scene names, actor references, or duration values reported in the error.

@@ -23,10 +23,7 @@ def _read_json(path: Path) -> object:
         raise DataValidationError(f"invalid JSON in {path}: {exc}") from exc
 
 
-def load_actor_availability(path: str | Path) -> dict[str, Matrix]:
-    src = Path(path)
-    raw = _read_json(src)
-
+def parse_actor_availability(raw: object) -> dict[str, Matrix]:
     if not isinstance(raw, dict):
         raise DataValidationError("actors file must be an object: {actor_name: matrix}")
 
@@ -44,6 +41,12 @@ def load_actor_availability(path: str | Path) -> dict[str, Matrix]:
         raise DataValidationError("actors file is empty")
 
     return actors
+
+
+def load_actor_availability(path: str | Path) -> dict[str, Matrix]:
+    src = Path(path)
+    raw = _read_json(src)
+    return parse_actor_availability(raw)
 
 
 def _validate_scene_item(item: object, known_actors: set[str], index: int) -> Scene:
@@ -76,10 +79,7 @@ def _validate_scene_item(item: object, known_actors: set[str], index: int) -> Sc
     return Scene(name=name, actors=tuple(normalized_actor_names), duration_slots=duration_slots)
 
 
-def load_scenes(path: str | Path, known_actors: set[str]) -> list[Scene]:
-    src = Path(path)
-    raw = _read_json(src)
-
+def parse_scenes(raw: object, known_actors: set[str]) -> list[Scene]:
     if not isinstance(raw, list):
         raise DataValidationError("scenes file must be an array")
 
@@ -93,3 +93,9 @@ def load_scenes(path: str | Path, known_actors: set[str]) -> list[Scene]:
         raise DataValidationError("scene names must be unique")
 
     return scenes
+
+
+def load_scenes(path: str | Path, known_actors: set[str]) -> list[Scene]:
+    src = Path(path)
+    raw = _read_json(src)
+    return parse_scenes(raw, known_actors)
