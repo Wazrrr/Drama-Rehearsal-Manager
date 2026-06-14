@@ -43,12 +43,13 @@ from time_grid import DAYS, SLOT_START_HOURS, slot_label
 
 LOCAL_DATA_DIR = DEFAULT_LOCAL_DATA_DIR
 APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
+DAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 ACTIVE_SECTION_KEY = "active_section"
 ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
 ACTION_BUTTON_WIDTH = 112
 AVAILABILITY_ROW_HEIGHT = 84
-AVAILABILITY_DAY_WIDTH = 44
-AVAILABILITY_SLOT_WIDTH = 96
+AVAILABILITY_DAY_WIDTH = 116
+AVAILABILITY_TIME_SLOT_WIDTH = 104
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -819,18 +820,18 @@ def actor_summary(project: ProjectData) -> pd.DataFrame:
 
 
 def availability_column_config(dataframe: pd.DataFrame) -> dict[str, object]:
-    slot_columns = [column for column in dataframe.columns if column != "Day"]
+    day_columns = [column for column in dataframe.columns if column != "Time slot"]
     return {
-        "Day": st.column_config.TextColumn(
-            "Day",
-            width=AVAILABILITY_DAY_WIDTH,
+        "Time slot": st.column_config.TextColumn(
+            "Time slot",
+            width=AVAILABILITY_TIME_SLOT_WIDTH,
         ),
         **{
             column: st.column_config.TextColumn(
                 column,
-                width=AVAILABILITY_SLOT_WIDTH,
+                width=AVAILABILITY_DAY_WIDTH,
             )
-            for column in slot_columns
+            for column in day_columns
         },
     }
 
@@ -839,33 +840,37 @@ def actor_availability_sheet(
     project: ProjectData,
     allowed_day_indexes: set[int],
 ) -> pd.DataFrame:
-    columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+    day_columns = [
+        (day_index, DAY_LABELS[day_index])
+        for day_index in range(len(DAYS))
+        if day_index in allowed_day_indexes
+    ]
     rows: list[dict[str, str]] = []
-    for day_index, day in enumerate(DAYS):
-        if day_index not in allowed_day_indexes:
-            continue
-        row = {"Day": day}
-        for slot_index, column in enumerate(columns):
+    for slot_index in range(len(SLOT_START_HOURS)):
+        row = {"Time slot": slot_label(slot_index)}
+        for day_index, column in day_columns:
             row[column] = "\n".join(
                 actor_name
                 for actor_name, matrix in project.actors.items()
                 if bool(matrix[day_index][slot_index])
             )
         rows.append(row)
-    return pd.DataFrame(rows, columns=["Day", *columns])
+    return pd.DataFrame(rows, columns=["Time slot", *[column for _, column in day_columns]])
 
 
 def scene_availability_sheet(
     results: dict[str, list[FeasibleSlot]],
     allowed_day_indexes: set[int],
 ) -> pd.DataFrame:
-    columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+    day_columns = [
+        (day_index, DAY_LABELS[day_index])
+        for day_index in range(len(DAYS))
+        if day_index in allowed_day_indexes
+    ]
     rows: list[dict[str, str]] = []
-    for day_index, day in enumerate(DAYS):
-        if day_index not in allowed_day_indexes:
-            continue
-        row = {"Day": day}
-        for slot_index, column in enumerate(columns):
+    for slot_index in range(len(SLOT_START_HOURS)):
+        row = {"Time slot": slot_label(slot_index)}
+        for day_index, column in day_columns:
             row[column] = "\n".join(
                 scene_name
                 for scene_name, slots in results.items()
@@ -873,7 +878,7 @@ def scene_availability_sheet(
                 if slot.day_index == day_index and slot.start_slot == slot_index
             )
         rows.append(row)
-    return pd.DataFrame(rows, columns=["Day", *columns])
+    return pd.DataFrame(rows, columns=["Time slot", *[column for _, column in day_columns]])
 
 
 def render_availability_dataframe(dataframe: pd.DataFrame) -> None:
