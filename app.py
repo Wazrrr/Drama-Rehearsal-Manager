@@ -225,7 +225,7 @@ def rerun() -> None:
 
 def render_shell() -> None:
     st.set_page_config(page_title="Rehearsal Manager", layout="wide")
-    preserve_copy_shortcut()
+    install_keyboard_shortcuts()
     st.markdown(
         """
         <style>
@@ -258,20 +258,42 @@ def render_shell() -> None:
     )
 
 
-def preserve_copy_shortcut() -> None:
+def install_keyboard_shortcuts() -> None:
     components.html(
         """
         <script>
         (() => {
           const parentDocument = window.parent.document;
-          if (parentDocument.__rehearsalCopyShortcutGuard) {
+          if (parentDocument.__rehearsalShortcutGuard) {
             return;
           }
-          parentDocument.__rehearsalCopyShortcutGuard = true;
+          parentDocument.__rehearsalShortcutGuard = true;
           parentDocument.addEventListener("keydown", (event) => {
             const key = (event.key || "").toLowerCase();
             if ((event.metaKey || event.ctrlKey) && key === "c") {
               event.stopImmediatePropagation();
+              return;
+            }
+
+            const platform = (
+              navigator.userAgentData?.platform
+              || navigator.platform
+              || ""
+            ).toLowerCase();
+            const isMac = platform.includes("mac")
+              || platform.includes("iphone")
+              || platform.includes("ipad")
+              || platform.includes("ipod");
+            const saveModifier = isMac ? event.metaKey : event.ctrlKey;
+            if (saveModifier && key === "s" && !event.altKey && !event.shiftKey) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              const saveButton = parentDocument.querySelector(
+                ".st-key-save_drama_action button:not(:disabled)"
+              );
+              if (saveButton) {
+                saveButton.click();
+              }
             }
           }, true);
         })();
