@@ -42,6 +42,9 @@ from models import Scene
 from time_grid import DAYS, SLOT_START_HOURS, slot_label
 
 LOCAL_DATA_DIR = DEFAULT_LOCAL_DATA_DIR
+APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
+ACTIVE_SECTION_KEY = "active_section"
+ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -84,6 +87,30 @@ def pop_session_value(key: str) -> object | None:
     value = st.session_state[key]
     del st.session_state[key]
     return value
+
+
+def normalize_active_section(value: object) -> str:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if value in APP_SECTIONS:
+        return str(value)
+    return "Actors"
+
+
+def set_active_section(value: object) -> str:
+    active_section = normalize_active_section(value)
+    st.session_state[ACTIVE_SECTION_KEY] = active_section
+    return active_section
+
+
+def sync_active_section_from_control() -> None:
+    set_active_section(st.session_state.get(ACTIVE_SECTION_CONTROL_KEY))
+
+
+def ensure_active_section_state() -> None:
+    active_section = set_active_section(st.session_state.get(ACTIVE_SECTION_KEY))
+    if st.session_state.get(ACTIVE_SECTION_CONTROL_KEY) != active_section:
+        st.session_state[ACTIVE_SECTION_CONTROL_KEY] = active_section
 
 
 def set_project(project: ProjectData, *, reset_ui_state: bool = False) -> None:
@@ -1018,6 +1045,7 @@ def render_advanced_tab() -> None:
 def main() -> None:
     render_shell()
     initialize_state()
+    ensure_active_section_state()
     render_sidebar()
 
     load_error = st.session_state.get("load_error")
@@ -1033,16 +1061,23 @@ def main() -> None:
 
     st.caption(f"Drama: {st.session_state.current_drama_name}")
 
-    actors_tab, scenes_tab, results_tab, advanced_tab = st.tabs(
-        ["Actors", "Scenes", "Results", "Advanced"]
+    active_section = st.segmented_control(
+        "Section",
+        APP_SECTIONS,
+        key=ACTIVE_SECTION_CONTROL_KEY,
+        on_change=sync_active_section_from_control,
+        label_visibility="collapsed",
+        width="stretch",
     )
-    with actors_tab:
+    active_section = set_active_section(active_section)
+
+    if active_section == "Actors":
         render_actors_tab()
-    with scenes_tab:
+    elif active_section == "Scenes":
         render_scenes_tab()
-    with results_tab:
+    elif active_section == "Results":
         render_results_tab()
-    with advanced_tab:
+    elif active_section == "Advanced":
         render_advanced_tab()
 
 
