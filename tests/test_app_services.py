@@ -13,6 +13,7 @@ from app_services import (
     empty_project,
     load_project,
     parse_project_payloads,
+    result_rows,
     save_project,
 )
 from day_filters import filter_results_by_day_indexes, resolve_allowed_day_indexes
@@ -32,7 +33,7 @@ from drama_storage import (
     save_drama,
 )
 from loader import DataValidationError
-from models import Scene
+from models import FeasibleSlot, Scene
 from time_grid import DAYS_PER_WEEK, SLOTS_PER_DAY
 
 
@@ -133,6 +134,43 @@ class AppServicesTests(unittest.TestCase):
 
         self.assertEqual(len(filtered["Scene"]), 1)
         self.assertEqual(filtered["Scene"][0].day_index, 0)
+
+    def test_result_rows_merge_contiguous_slots_and_include_description(self) -> None:
+        rows = result_rows(
+            {
+                "Scene": [
+                    FeasibleSlot(day_index=0, start_slot=0, duration_slots=1),
+                    FeasibleSlot(day_index=0, start_slot=1, duration_slots=1),
+                    FeasibleSlot(day_index=0, start_slot=3, duration_slots=1),
+                    FeasibleSlot(day_index=1, start_slot=0, duration_slots=1),
+                ]
+            },
+            [Scene(name="Scene", actors=("Alice",), description="Opening moment")],
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "Scene": "Scene",
+                    "Description": "Opening moment",
+                    "Slots": "Mon 10:00-14:00",
+                },
+                {
+                    "Scene": "Scene",
+                    "Description": "Opening moment",
+                    "Slots": "Mon 16:00-18:00",
+                },
+                {
+                    "Scene": "Scene",
+                    "Description": "Opening moment",
+                    "Slots": "Tue 10:00-12:00",
+                },
+            ],
+        )
+        self.assertNotIn("Day index", rows[0])
+        self.assertNotIn("Start slot", rows[0])
+        self.assertNotIn("Duration slots", rows[0])
 
     def test_parse_project_payloads_allows_empty_when_requested(self) -> None:
         project = parse_project_payloads({}, [], allow_empty=True)

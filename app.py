@@ -1195,7 +1195,7 @@ def render_results_tab() -> None:
         return
 
     filtered = filter_results_by_day_indexes(results, allowed_day_indexes)
-    rows = result_rows(filtered)
+    rows = result_rows(filtered, project.scenes)
     total_slots = sum(len(slots) for slots in filtered.values())
     scenes_with_slots = sum(1 for slots in filtered.values() if slots)
 
@@ -1229,7 +1229,11 @@ def render_results_tab() -> None:
         st.warning("No days are selected.")
 
     st.markdown("#### Feasible Slots")
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.dataframe(
+        pd.DataFrame(rows, columns=["Scene", "Description", "Slots"]),
+        hide_index=True,
+        width="stretch",
+    )
 
     dl_col1, dl_col2 = st.columns(2)
     dl_col1.download_button(

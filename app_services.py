@@ -121,28 +121,46 @@ def compute_project_results(project: ProjectData) -> dict[str, list[FeasibleSlot
     return compute_all_scene_feasibility(validated.scenes, validated.actors)
 
 
-def result_rows(results: dict[str, list[FeasibleSlot]]) -> list[dict[str, object]]:
+def _merged_slot_labels(slots: list[FeasibleSlot]) -> list[str]:
+    merged: list[tuple[int, int, int]] = []
+    for slot in sorted(slots, key=lambda item: (item.day_index, item.start_slot)):
+        start = slot.start_slot
+        end = slot.start_slot + slot.duration_slots
+        if merged:
+            last_day, last_start, last_end = merged[-1]
+            if last_day == slot.day_index and start <= last_end:
+                merged[-1] = (last_day, last_start, max(last_end, end))
+                continue
+        merged.append((slot.day_index, start, end))
+
+    return [
+        interval_label(day_index, start_slot, end_slot - start_slot)
+        for day_index, start_slot, end_slot in merged
+    ]
+
+
+def result_rows(
+    results: dict[str, list[FeasibleSlot]],
+    scenes: list[Scene],
+) -> list[dict[str, object]]:
+    descriptions = {scene.name: scene.description for scene in scenes}
     rows: list[dict[str, object]] = []
     for scene_name, slots in results.items():
         if not slots:
             rows.append(
                 {
                     "Scene": scene_name,
-                    "Slot": "No feasible slots",
-                    "Day index": None,
-                    "Start slot": None,
-                    "Duration slots": None,
+                    "Description": descriptions.get(scene_name, ""),
+                    "Slots": "No feasible slots",
                 }
             )
             continue
-        for slot in slots:
+        for slot_label in _merged_slot_labels(slots):
             rows.append(
                 {
                     "Scene": scene_name,
-                    "Slot": interval_label(slot.day_index, slot.start_slot, slot.duration_slots),
-                    "Day index": slot.day_index,
-                    "Start slot": slot.start_slot,
-                    "Duration slots": slot.duration_slots,
+                    "Description": descriptions.get(scene_name, ""),
+                    "Slots": slot_label,
                 }
             )
     return rows
