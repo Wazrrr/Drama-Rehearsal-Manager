@@ -45,6 +45,7 @@ LOCAL_DATA_DIR = DEFAULT_LOCAL_DATA_DIR
 APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
 ACTIVE_SECTION_KEY = "active_section"
 ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
+ACTION_BUTTON_WIDTH = 112
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -544,47 +545,50 @@ def render_sidebar() -> None:
                     st.session_state.sidebar_success = "Switched drama."
                     rerun()
 
-    create_col, rename_col, delete_col, save_col = st.sidebar.columns(4)
-    if create_col.button(
-        "",
-        icon=":material/add:",
-        help="Create drama",
-        type="primary",
-        width="stretch",
-    ):
-        open_drama_dialog("create")
-    if rename_col.button(
-        "",
-        icon=":material/edit:",
-        help="Rename drama",
-        disabled=not has_current_drama(),
-        width="stretch",
-    ):
-        open_drama_dialog("rename")
-    if delete_col.button(
-        "",
-        icon=":material/delete:",
-        help="Delete drama",
-        disabled=not has_current_drama(),
-        width="stretch",
-    ):
-        open_drama_dialog("delete")
-
     save_disabled = not has_current_drama() or not can_save or not dirty
-    if save_col.button(
-        "",
-        icon=":material/save:",
-        help="Save drama",
-        disabled=save_disabled,
-        width="stretch",
-    ):
-        try:
-            save_current_drama()
-        except DataValidationError as exc:
-            st.sidebar.error(str(exc))
-        else:
-            st.session_state.sidebar_success = "Drama saved."
-            rerun()
+    with st.sidebar.container(horizontal=True, gap="small"):
+        if st.button(
+            "Create",
+            icon=":material/add:",
+            help="Create drama",
+            key="create_drama_action",
+            type="primary",
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            open_drama_dialog("create")
+        if st.button(
+            "Rename",
+            icon=":material/edit:",
+            help="Rename drama",
+            key="rename_drama_action",
+            disabled=not has_current_drama(),
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            open_drama_dialog("rename")
+        if st.button(
+            "Delete",
+            icon=":material/delete:",
+            help="Delete drama",
+            key="delete_drama_action",
+            disabled=not has_current_drama(),
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            open_drama_dialog("delete")
+        if st.button(
+            "Save",
+            icon=":material/save:",
+            help="Save drama",
+            key="save_drama_action",
+            disabled=save_disabled,
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            try:
+                save_current_drama()
+            except DataValidationError as exc:
+                st.sidebar.error(str(exc))
+            else:
+                st.session_state.sidebar_success = "Drama saved."
+                rerun()
 
     render_active_drama_dialog()
 
@@ -665,19 +669,19 @@ def render_actors_tab() -> None:
     actor_names = list(project.actors)
 
     list_header_col, add_actor_col = st.columns(
-        [0.92, 0.08],
+        [0.82, 0.18],
         vertical_alignment="center",
     )
     with list_header_col:
         st.markdown("#### Actor List")
-    with add_actor_col:
+    with add_actor_col.container(horizontal_alignment="right"):
         if st.button(
-            "",
+            "Add",
             icon=":material/add:",
             help="Add actor",
             key="open_add_actor_dialog",
             type="primary",
-            width="stretch",
+            width=ACTION_BUTTON_WIDTH,
         ):
             open_actor_dialog("add")
     render_active_actor_dialog()
@@ -830,19 +834,19 @@ def render_scenes_tab() -> None:
     actor_names = list(project.actors)
 
     list_header_col, add_scene_col = st.columns(
-        [0.92, 0.08],
+        [0.82, 0.18],
         vertical_alignment="center",
     )
     with list_header_col:
         st.markdown("#### Scene List")
-    with add_scene_col:
+    with add_scene_col.container(horizontal_alignment="right"):
         if st.button(
-            "",
+            "Add",
             icon=":material/add:",
             help="Add scene",
             key="open_add_scene_dialog",
             type="primary",
-            width="stretch",
+            width=ACTION_BUTTON_WIDTH,
         ):
             open_scene_dialog("add")
     render_active_scene_dialog()
