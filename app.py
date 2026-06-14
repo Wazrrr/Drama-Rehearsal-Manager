@@ -371,7 +371,12 @@ def create_drama_dialog() -> None:
         return
 
     with st.form("create_drama_dialog_form"):
-        name = st.text_input("Drama name", key="create_dialog_drama_name")
+        st.markdown("##### Drama name")
+        name = st.text_input(
+            "Drama name",
+            key="create_dialog_drama_name",
+            label_visibility="collapsed",
+        )
         submitted = st.form_submit_button(
             "Create drama",
             icon=":material/add:",
@@ -430,10 +435,12 @@ def rename_drama_dialog() -> None:
         return
 
     with st.form("rename_drama_dialog_form"):
+        st.markdown("##### Drama name")
         name = st.text_input(
             "Drama name",
             value=str(st.session_state.current_drama_name),
             key="rename_dialog_drama_name",
+            label_visibility="collapsed",
         )
         submitted = st.form_submit_button(
             "Rename drama",
@@ -492,9 +499,11 @@ def delete_drama_dialog() -> None:
         return
 
     st.warning(f"Delete `{st.session_state.current_drama_name}` permanently?")
+    st.markdown("##### Type the drama name to confirm")
     confirm_name = st.text_input(
         "Type the drama name to confirm",
         key="delete_dialog_confirm_name",
+        label_visibility="collapsed",
     )
     delete_disabled = confirm_name != str(st.session_state.current_drama_name)
     with st.container(key="delete_dialog_action"):
@@ -671,7 +680,12 @@ def render_active_actor_dialog() -> None:
 def add_actor_dialog() -> None:
     project = get_project()
     with st.form("add_actor_dialog_form"):
-        new_actor = st.text_input("Actor name", key="add_actor_dialog_name")
+        st.markdown("##### Actor name")
+        new_actor = st.text_input(
+            "Actor name",
+            key="add_actor_dialog_name",
+            label_visibility="collapsed",
+        )
         st.markdown("##### Availability")
         columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
         source = pd.DataFrame(blank_matrix(), columns=columns)
@@ -721,46 +735,23 @@ def edit_actor_dialog() -> None:
         return
 
     with st.container(border=True):
-        actor_col, rename_col = st.columns(2)
+        actor_col, name_col = st.columns(2)
         with actor_col:
-            st.markdown("##### Actor")
-            selected = st.selectbox("Actor", actor_names, key=project_widget_key("actor_selector"))
-            used_in = [scene.name for scene in project.scenes if selected in scene.actors]
-            with st.container(key="delete_actor_action"):
-                if used_in:
-                    st.button("Delete actor", disabled=True, width="stretch")
-                    st.warning("Remove this actor from scenes before deleting.")
-                else:
-                    if st.button("Delete actor", width="stretch"):
-                        del project.actors[selected]
-                        set_project_dirty()
-                        reset_project_ui_state()
-                        close_actor_dialog()
-                        st.session_state.main_success = "Actor deleted."
-                        rerun()
-
-        with rename_col:
+            st.markdown("##### Select actor")
+            selected = st.selectbox(
+                "Choose Actor",
+                actor_names,
+                label_visibility="collapsed",
+                key=project_widget_key("actor_selector"),
+            )
+        with name_col:
             st.markdown("##### Rename")
-            with st.form("rename_actor"):
-                updated_name = st.text_input(
-                    "Actor name",
-                    value=selected,
-                    key=project_widget_key(f"rename_actor_{selected}"),
-                )
-                renamed = st.form_submit_button("Rename actor", width="stretch")
-                if renamed:
-                    cleaned = updated_name.strip()
-                    if not cleaned:
-                        st.error("Actor name is required.")
-                    elif cleaned != selected and cleaned in project.actors:
-                        st.error("Actor names must be unique.")
-                    elif cleaned != selected:
-                        rename_actor(project, selected, cleaned)
-                        set_project_dirty()
-                        reset_project_ui_state()
-                        close_actor_dialog()
-                        st.session_state.main_success = "Actor renamed and scene references updated."
-                        rerun()
+            updated_name = st.text_input(
+                "Actor name",
+                value=selected,
+                label_visibility="collapsed",
+                key=project_widget_key(f"rename_actor_{selected}"),
+            )
 
         st.markdown("##### Availability")
         columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
@@ -778,14 +769,38 @@ def edit_actor_dialog() -> None:
             },
             key=project_widget_key(f"availability_editor_{selected}"),
         )
-        if st.button("Apply availability", width="stretch"):
-            project.actors[selected] = [
-                [bool(edited.loc[row_index, column]) for column in columns]
-                for row_index in range(len(DAYS))
-            ]
-            set_project_dirty()
-            st.success("Availability updated.")
-            rerun()
+        if st.button("Save actor", type="primary", width="stretch"):
+            cleaned = updated_name.strip()
+            if not cleaned:
+                st.error("Actor name is required.")
+            elif cleaned != selected and cleaned in project.actors:
+                st.error("Actor names must be unique.")
+            else:
+                updated_matrix = [
+                    [bool(edited.loc[row_index, column]) for column in columns]
+                    for row_index in range(len(DAYS))
+                ]
+                if cleaned != selected:
+                    rename_actor(project, selected, cleaned)
+                project.actors[cleaned] = updated_matrix
+                set_project_dirty()
+                reset_project_ui_state()
+                close_actor_dialog()
+                st.session_state.main_success = "Actor saved."
+                rerun()
+
+        used_in = [scene.name for scene in project.scenes if selected in scene.actors]
+        with st.container(key="delete_actor_action"):
+            if used_in:
+                st.button("Delete actor", disabled=True, width="stretch")
+                st.warning("Remove this actor from scenes before deleting.")
+            elif st.button("Delete actor", width="stretch"):
+                del project.actors[selected]
+                set_project_dirty()
+                reset_project_ui_state()
+                close_actor_dialog()
+                st.session_state.main_success = "Actor deleted."
+                rerun()
 
 
 def actor_summary(project: ProjectData) -> pd.DataFrame:
@@ -898,7 +913,7 @@ def render_actors_tab() -> None:
         if st.button(
             "Add",
             icon=":material/add:",
-            help="Add actor",
+            help="Add Actor",
             key="open_add_actor_dialog",
             type="primary",
             width=ACTION_BUTTON_WIDTH,
@@ -966,20 +981,27 @@ def add_scene_dialog() -> None:
         return
 
     with st.form("add_scene_dialog_form"):
+        st.markdown("##### Scene")
         name = st.text_input(
             "Scene",
             key=project_widget_key("add_scene_dialog_name"),
+            label_visibility="collapsed",
         )
+        st.markdown("##### Description")
         description = st.text_input(
             "Description",
-            placeholder="optional",
+            placeholder="Optional",
             key=project_widget_key("add_scene_dialog_description"),
+            label_visibility="collapsed",
         )
+        st.markdown("##### Actors")
         actors = st.multiselect(
             "Actors",
             actor_names,
             key=project_widget_key("add_scene_dialog_actors"),
+            label_visibility="collapsed",
         )
+        st.markdown("#####  Duration slots")
         duration = st.number_input(
             "Duration slots",
             min_value=1,
@@ -987,6 +1009,7 @@ def add_scene_dialog() -> None:
             value=1,
             step=1,
             key=project_widget_key("add_scene_dialog_duration"),
+            label_visibility="collapsed",
         )
         submitted = st.form_submit_button(
             "Add scene",
@@ -1028,28 +1051,36 @@ def edit_scene_dialog() -> None:
         return
 
     scene_names = [scene.name for scene in project.scenes]
-    selected_name = st.selectbox("Scene", scene_names, key=project_widget_key("scene_selector"))
+    st.markdown("##### Select scene")
+    selected_name = st.selectbox("Scene", scene_names, label_visibility="collapsed", key=project_widget_key("scene_selector"))
     selected_index = scene_names.index(selected_name)
     selected_scene = project.scenes[selected_index]
 
     with st.container(border=True):
         with st.form("edit_scene", border=False):
+            st.markdown("##### Scene")
             edited_name = st.text_input(
                 "Scene",
                 value=selected_scene.name,
                 key=project_widget_key(f"edit_scene_name_{selected_name}"),
+                label_visibility="collapsed",
             )
+            st.markdown("##### Description")
             edited_description = st.text_input(
                 "Description",
                 value=selected_scene.description,
                 key=project_widget_key(f"edit_scene_description_{selected_name}"),
+                label_visibility="collapsed",
             )
+            st.markdown("##### Actors")
             edited_actors = st.multiselect(
                 "Actors",
                 actor_names,
                 default=list(selected_scene.actors),
                 key=project_widget_key(f"edit_scene_actors_{selected_name}"),
+                label_visibility="collapsed",
             )
+            st.markdown("##### Duration slots")
             edited_duration = st.number_input(
                 "Duration slots",
                 min_value=1,
@@ -1057,8 +1088,9 @@ def edit_scene_dialog() -> None:
                 value=selected_scene.duration_slots,
                 step=1,
                 key=project_widget_key(f"edit_scene_duration_{selected_name}"),
+                label_visibility="collapsed",
             )
-            saved = st.form_submit_button("Save scene", width="stretch")
+            saved = st.form_submit_button("Save scene", type="primary", width="stretch")
             if saved:
                 cleaned_name = edited_name.strip()
                 cleaned_description = edited_description.strip()
@@ -1088,7 +1120,7 @@ def edit_scene_dialog() -> None:
 
         with st.container(key="delete_scene_action"):
             if st.button(
-                "Delete selected scene",
+                "Delete Selected Scene",
                 icon=":material/delete:",
                 width="stretch",
             ):
@@ -1117,7 +1149,7 @@ def render_scenes_tab() -> None:
         if st.button(
             "Edit",
             icon=":material/edit:",
-            help="Edit scene",
+            help="Edit Scene",
             key="open_edit_scene_dialog",
             disabled=not project.scenes,
             width=ACTION_BUTTON_WIDTH,
@@ -1126,7 +1158,7 @@ def render_scenes_tab() -> None:
         if st.button(
             "Add",
             icon=":material/add:",
-            help="Add scene",
+            help="Add Scene",
             key="open_add_scene_dialog",
             type="primary",
             width=ACTION_BUTTON_WIDTH,
