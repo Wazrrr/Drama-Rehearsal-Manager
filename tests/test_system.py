@@ -119,8 +119,8 @@ class RehearsalManagementTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(proc_human.returncode, 0, msg=proc_human.stderr)
-        self.assertIn("Scene_1:", proc_human.stdout)
-        self.assertIn("Finale:", proc_human.stdout)
+        self.assertIn("Scene 01 - Arrival Drill:", proc_human.stdout)
+        self.assertIn("Scene 10 - Final Reckoning:", proc_human.stdout)
 
         proc_json = subprocess.run(
             [
@@ -140,8 +140,8 @@ class RehearsalManagementTests(unittest.TestCase):
         )
         self.assertEqual(proc_json.returncode, 0, msg=proc_json.stderr)
         payload = json.loads(proc_json.stdout)
-        self.assertIn("Scene_1", payload)
-        self.assertIsInstance(payload["Scene_1"], list)
+        self.assertIn("Scene 01 - Arrival Drill", payload)
+        self.assertIsInstance(payload["Scene 01 - Arrival Drill"], list)
 
     def test_cli_drama_input(self) -> None:
         root = Path(__file__).resolve().parent.parent

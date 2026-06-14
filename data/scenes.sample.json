@@ -1,17 +1,62 @@
 [
   {
-    "name": "Scene_1",
-    "actors": ["Alice", "Bob"],
+    "name": "Scene 01 - Arrival Drill",
+    "description": "A small group establishes the daily routine, the shared objective, and the first practical conflict.",
+    "actors": ["Actor A", "Actor B", "Actor C"],
     "duration_slots": 1
   },
   {
-    "name": "Scene_2",
-    "actors": ["Alice", "Carol"],
-    "duration_slots": 2
+    "name": "Scene 02 - Office Ledger",
+    "description": "Two planners compare records while a third person redirects the conversation toward an urgent decision.",
+    "actors": ["Actor A", "Actor D", "Actor E"],
+    "duration_slots": 1
   },
   {
-    "name": "Finale",
-    "actors": ["Alice", "Bob", "Carol"],
+    "name": "Scene 03 - Faculty Debate",
+    "description": "A policy disagreement turns into a public test of alliances, timing, and authority.",
+    "actors": ["Actor B", "Actor C", "Actor F", "Actor G"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 04 - Courtyard Plan",
+    "description": "A private plan is rehearsed in fragments as unexpected witnesses reshape the stakes.",
+    "actors": ["Actor A", "Actor C", "Actor D", "Actor H"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 05 - Notice Board",
+    "description": "An announcement scene that requires precise entrances, overlapping reactions, and fast handoffs.",
+    "actors": ["Actor B", "Actor E", "Actor F"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 06 - Private Bargain",
+    "description": "A quiet negotiation changes direction twice and sets up the next group confrontation.",
+    "actors": ["Actor A", "Actor E", "Actor H"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 07 - Committee Hearing",
+    "description": "Five characters hold a formal meeting where each interruption has a specific cue and response.",
+    "actors": ["Actor A", "Actor B", "Actor D", "Actor F", "Actor G"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 08 - Interrupted Lesson",
+    "description": "A lesson structure breaks down into overlapping questions, corrections, and shifting focus.",
+    "actors": ["Actor C", "Actor D", "Actor E", "Actor F", "Actor H"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 09 - Full Company Shift",
+    "description": "The full ensemble resets the space, tracks shared discoveries, and lands the midpoint reversal.",
+    "actors": ["Actor A", "Actor B", "Actor C", "Actor D", "Actor E", "Actor F", "Actor G", "Actor H"],
+    "duration_slots": 1
+  },
+  {
+    "name": "Scene 10 - Final Reckoning",
+    "description": "The closing sequence gathers the main conflicts into a fast series of reveals, reversals, and exits.",
+    "actors": ["Actor A", "Actor B", "Actor C", "Actor D", "Actor E", "Actor F", "Actor H"],
     "duration_slots": 1
   }
 ]
