@@ -38,7 +38,7 @@ from drama_storage import (
     save_drama,
 )
 from loader import DataValidationError
-from models import Scene
+from models import FeasibleSlot, Scene
 from time_grid import DAYS, SLOT_START_HOURS, slot_label
 
 LOCAL_DATA_DIR = DEFAULT_LOCAL_DATA_DIR
@@ -46,9 +46,9 @@ APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
 ACTIVE_SECTION_KEY = "active_section"
 ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
 ACTION_BUTTON_WIDTH = 112
-ACTOR_AVAILABILITY_ROW_HEIGHT = 84
-ACTOR_AVAILABILITY_DAY_WIDTH = 44
-ACTOR_AVAILABILITY_SLOT_WIDTH = 96
+AVAILABILITY_ROW_HEIGHT = 84
+AVAILABILITY_DAY_WIDTH = 44
+AVAILABILITY_SLOT_WIDTH = 96
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -796,10 +796,32 @@ def actor_summary(project: ProjectData) -> pd.DataFrame:
     )
 
 
-def actor_availability_sheet(project: ProjectData) -> pd.DataFrame:
+def availability_column_config(dataframe: pd.DataFrame) -> dict[str, object]:
+    slot_columns = [column for column in dataframe.columns if column != "Day"]
+    return {
+        "Day": st.column_config.TextColumn(
+            "Day",
+            width=AVAILABILITY_DAY_WIDTH,
+        ),
+        **{
+            column: st.column_config.TextColumn(
+                column,
+                width=AVAILABILITY_SLOT_WIDTH,
+            )
+            for column in slot_columns
+        },
+    }
+
+
+def actor_availability_sheet(
+    project: ProjectData,
+    allowed_day_indexes: set[int],
+) -> pd.DataFrame:
     columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
     rows: list[dict[str, str]] = []
     for day_index, day in enumerate(DAYS):
+        if day_index not in allowed_day_indexes:
+            continue
         row = {"Day": day}
         for slot_index, column in enumerate(columns):
             row[column] = "\n".join(
@@ -808,38 +830,43 @@ def actor_availability_sheet(project: ProjectData) -> pd.DataFrame:
                 if bool(matrix[day_index][slot_index])
             )
         rows.append(row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=["Day", *columns])
+
+
+def scene_availability_sheet(
+    results: dict[str, list[FeasibleSlot]],
+    allowed_day_indexes: set[int],
+) -> pd.DataFrame:
+    columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+    rows: list[dict[str, str]] = []
+    for day_index, day in enumerate(DAYS):
+        if day_index not in allowed_day_indexes:
+            continue
+        row = {"Day": day}
+        for slot_index, column in enumerate(columns):
+            row[column] = "\n".join(
+                scene_name
+                for scene_name, slots in results.items()
+                for slot in slots
+                if slot.day_index == day_index and slot.start_slot == slot_index
+            )
+        rows.append(row)
+    return pd.DataFrame(rows, columns=["Day", *columns])
+
+
+def render_availability_dataframe(dataframe: pd.DataFrame) -> None:
+    st.dataframe(
+        dataframe,
+        hide_index=True,
+        column_config=availability_column_config(dataframe),
+        row_height=AVAILABILITY_ROW_HEIGHT,
+        width="stretch",
+    )
 
 
 def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
-
-    st.markdown("#### Actor Availability Sheet")
-    if actor_names:
-        availability = actor_availability_sheet(project)
-        slot_columns = [column for column in availability.columns if column != "Day"]
-        st.dataframe(
-            availability,
-            hide_index=True,
-            column_config={
-                "Day": st.column_config.TextColumn(
-                    "Day",
-                    width=ACTOR_AVAILABILITY_DAY_WIDTH,
-                ),
-                **{
-                    column: st.column_config.TextColumn(
-                        column,
-                        width=ACTOR_AVAILABILITY_SLOT_WIDTH,
-                    )
-                    for column in slot_columns
-                },
-            },
-            row_height=ACTOR_AVAILABILITY_ROW_HEIGHT,
-            width="stretch",
-        )
-    else:
-        st.info("Add an actor to start building availability.")
 
     list_header_col, actor_action_col = st.columns(
         [0.68, 0.32],
@@ -1039,7 +1066,7 @@ def render_scenes_tab() -> None:
         vertical_alignment="center",
     )
     with list_header_col:
-        st.markdown("#### Scene List")
+        st.markdown("#### Scene-Actor List")
     with scene_action_col.container(
         horizontal=True,
         horizontal_alignment="right",
@@ -1078,11 +1105,17 @@ def render_results_tab() -> None:
     project = get_project()
     st.subheader("Results")
 
-    filter_col, metric_col = st.columns([2, 1])
-    with filter_col:
-        chosen_days = st.multiselect("Days", list(DAYS), default=list(DAYS))
-        no_weekend = st.checkbox("Exclude weekends")
+    if "results_days_filter" not in st.session_state:
+        st.session_state.results_days_filter = list(DAYS)
+    if "results_no_weekend_filter" not in st.session_state:
+        st.session_state.results_no_weekend_filter = False
 
+    chosen_days = [
+        day
+        for day in st.session_state.get("results_days_filter", list(DAYS))
+        if day in DAYS
+    ]
+    no_weekend = bool(st.session_state.get("results_no_weekend_filter", False))
     allowed_day_indexes = {DAYS.index(day) for day in chosen_days}
     if no_weekend:
         allowed_day_indexes -= {5, 6}
@@ -1098,14 +1131,33 @@ def render_results_tab() -> None:
     total_slots = sum(len(slots) for slots in filtered.values())
     scenes_with_slots = sum(1 for slots in filtered.values() if slots)
 
-    with metric_col:
-        st.metric("Scenes", len(project.scenes))
-        st.metric("Scenes with slots", scenes_with_slots)
-        st.metric("Feasible slots", total_slots)
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("Scenes", len(project.scenes))
+    metric_col2.metric("Scenes with slots", scenes_with_slots)
+    metric_col3.metric("Feasible slots", total_slots)
+
+    filter_col1, filter_col2 = st.columns([2, 1])
+    with filter_col1:
+        st.multiselect("Days", list(DAYS), key="results_days_filter")
+    with filter_col2:
+        st.checkbox("Exclude weekends", key="results_no_weekend_filter")
 
     if not allowed_day_indexes:
         st.warning("No days are selected.")
 
+    st.markdown("#### Actor Availability Sheet")
+    if project.actors:
+        render_availability_dataframe(actor_availability_sheet(project, allowed_day_indexes))
+    else:
+        st.info("Add an actor to start building availability.")
+
+    st.markdown("#### Scene Availability Sheet")
+    if project.scenes:
+        render_availability_dataframe(scene_availability_sheet(filtered, allowed_day_indexes))
+    else:
+        st.info("Add a scene to start matching rehearsal slots.")
+
+    st.markdown("#### Feasible Slots")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     dl_col1, dl_col2 = st.columns(2)
