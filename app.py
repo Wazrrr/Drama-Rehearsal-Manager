@@ -15,8 +15,6 @@ from app_services import (
     dump_actors_json,
     dump_scenes_json,
     empty_project,
-    export_results_json,
-    export_results_text,
     merged_slot_labels,
     parse_project_payloads,
     result_rows,
@@ -1219,12 +1217,10 @@ def render_results_tab() -> None:
     filtered = filter_results_by_day_indexes(results, allowed_day_indexes)
     rows = result_rows(filtered, project.scenes)
     total_slots = sum(len(slots) for slots in filtered.values())
-    scenes_with_slots = sum(1 for slots in filtered.values() if slots)
 
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1, metric_col2 = st.columns(2)
     metric_col1.metric("Scenes", len(project.scenes))
-    metric_col2.metric("Scenes with slots", scenes_with_slots)
-    metric_col3.metric("Feasible slots", total_slots)
+    metric_col2.metric("Feasible slots", total_slots)
 
     current_days = set(chosen_days)
     day_cols = st.columns(len(DAYS))
@@ -1257,33 +1253,17 @@ def render_results_tab() -> None:
         width="stretch",
     )
 
-    dl_col1, dl_col2 = st.columns(2)
-    dl_col1.download_button(
-        "Download results JSON",
-        data=export_results_json(filtered),
-        file_name="rehearsal-results.json",
-        mime="application/json",
-        width="stretch",
-    )
-    dl_col2.download_button(
-        "Download results text",
-        data=export_results_text(filtered),
-        file_name="rehearsal-results.txt",
-        mime="text/plain",
-        width="stretch",
-    )
+    st.markdown("#### Scene Availability Sheet")
+    if project.scenes:
+        render_availability_dataframe(scene_availability_sheet(filtered, allowed_day_indexes))
+    else:
+        st.info("Add a scene to start matching rehearsal slots.")
 
     st.markdown("#### Actor Availability Sheet")
     if project.actors:
         render_availability_dataframe(actor_availability_sheet(project, allowed_day_indexes))
     else:
         st.info("Add an actor to start building availability.")
-
-    st.markdown("#### Scene Availability Sheet")
-    if project.scenes:
-        render_availability_dataframe(scene_availability_sheet(filtered, allowed_day_indexes))
-    else:
-        st.info("Add a scene to start matching rehearsal slots.")
 
 
 def render_advanced_tab() -> None:
