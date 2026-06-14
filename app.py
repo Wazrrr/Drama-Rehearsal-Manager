@@ -46,6 +46,9 @@ APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
 ACTIVE_SECTION_KEY = "active_section"
 ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
 ACTION_BUTTON_WIDTH = 112
+ACTOR_AVAILABILITY_ROW_HEIGHT = 84
+ACTOR_AVAILABILITY_DAY_WIDTH = 44
+ACTOR_AVAILABILITY_SLOT_WIDTH = 96
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -791,16 +794,57 @@ def actor_summary(project: ProjectData) -> pd.DataFrame:
     )
 
 
+def actor_availability_sheet(project: ProjectData) -> pd.DataFrame:
+    columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+    rows: list[dict[str, str]] = []
+    for day_index, day in enumerate(DAYS):
+        row = {"Day": day}
+        for slot_index, column in enumerate(columns):
+            row[column] = "\n".join(
+                actor_name
+                for actor_name, matrix in project.actors.items()
+                if bool(matrix[day_index][slot_index])
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
+
+    st.markdown("#### Actor Availability Sheet")
+    if actor_names:
+        availability = actor_availability_sheet(project)
+        slot_columns = [column for column in availability.columns if column != "Day"]
+        st.dataframe(
+            availability,
+            hide_index=True,
+            column_config={
+                "Day": st.column_config.TextColumn(
+                    "Day",
+                    width=ACTOR_AVAILABILITY_DAY_WIDTH,
+                ),
+                **{
+                    column: st.column_config.TextColumn(
+                        column,
+                        width=ACTOR_AVAILABILITY_SLOT_WIDTH,
+                    )
+                    for column in slot_columns
+                },
+            },
+            row_height=ACTOR_AVAILABILITY_ROW_HEIGHT,
+            width="stretch",
+        )
+    else:
+        st.info("Add an actor to start building availability.")
 
     list_header_col, actor_action_col = st.columns(
         [0.68, 0.32],
         vertical_alignment="center",
     )
     with list_header_col:
-        st.markdown("#### Actor List")
+        st.markdown("#### Actor-Scene List")
     with actor_action_col.container(
         horizontal=True,
         horizontal_alignment="right",
@@ -829,7 +873,7 @@ def render_actors_tab() -> None:
     if actor_names:
         st.dataframe(actor_summary(project), hide_index=True, width="stretch")
     else:
-        st.info("Add an actor to start building availability.")
+        st.info("Add an actor to start building scene assignments.")
 
     if not actor_names:
         return
