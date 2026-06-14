@@ -235,12 +235,14 @@ def render_shell() -> None:
     st.markdown(
         """
         <style>
-          .st-key-delete_dialog_action button:not(:disabled) {
+          .st-key-delete_dialog_action button:not(:disabled),
+          .st-key-delete_actor_action button:not(:disabled) {
             background-color: #da3633 !important;
             border-color: #da3633 !important;
             color: white !important;
           }
-          .st-key-delete_dialog_action button:not(:disabled):hover {
+          .st-key-delete_dialog_action button:not(:disabled):hover,
+          .st-key-delete_actor_action button:not(:disabled):hover {
             background-color: #b62324 !important;
             border-color: #b62324 !important;
             color: white !important;
@@ -619,15 +621,34 @@ def close_actor_dialog() -> None:
 
 
 def render_active_actor_dialog() -> None:
-    if st.session_state.get("active_actor_dialog") == "add":
+    active_dialog = st.session_state.get("active_actor_dialog")
+    if active_dialog == "add":
         add_actor_dialog()
+    elif active_dialog == "edit":
+        edit_actor_dialog()
 
 
-@st.dialog("Add actor", on_dismiss=close_actor_dialog)
+@st.dialog("Add actor", width="large", on_dismiss=close_actor_dialog)
 def add_actor_dialog() -> None:
     project = get_project()
     with st.form("add_actor_dialog_form"):
         new_actor = st.text_input("Actor name", key="add_actor_dialog_name")
+        st.markdown("##### Availability")
+        columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+        source = pd.DataFrame(blank_matrix(), columns=columns)
+        source.insert(0, "Day", DAYS)
+        edited = st.data_editor(
+            source,
+            hide_index=True,
+            disabled=["Day"],
+            num_rows="fixed",
+            width="stretch",
+            column_config={
+                column: st.column_config.CheckboxColumn(column)
+                for column in columns
+            },
+            key=project_widget_key("add_actor_dialog_availability"),
+        )
         submitted = st.form_submit_button(
             "Add actor",
             icon=":material/add:",
@@ -642,11 +663,90 @@ def add_actor_dialog() -> None:
             elif cleaned in project.actors:
                 st.error("Actor names must be unique.")
             else:
-                project.actors[cleaned] = blank_matrix()
+                project.actors[cleaned] = [
+                    [bool(edited.loc[row_index, column]) for column in columns]
+                    for row_index in range(len(DAYS))
+                ]
                 set_project_dirty()
                 close_actor_dialog()
                 st.session_state.main_success = f"Added {cleaned}."
                 rerun()
+
+
+@st.dialog("Edit actor", width="large", on_dismiss=close_actor_dialog)
+def edit_actor_dialog() -> None:
+    project = get_project()
+    actor_names = list(project.actors)
+    if not actor_names:
+        st.warning("Add an actor before editing.")
+        return
+
+    with st.container(border=True):
+        actor_col, rename_col = st.columns(2)
+        with actor_col:
+            st.markdown("##### Actor")
+            selected = st.selectbox("Actor", actor_names, key=project_widget_key("actor_selector"))
+            used_in = [scene.name for scene in project.scenes if selected in scene.actors]
+            with st.container(key="delete_actor_action"):
+                if used_in:
+                    st.button("Delete actor", disabled=True, width="stretch")
+                    st.warning("Remove this actor from scenes before deleting.")
+                else:
+                    if st.button("Delete actor", width="stretch"):
+                        del project.actors[selected]
+                        set_project_dirty()
+                        reset_project_ui_state()
+                        close_actor_dialog()
+                        st.session_state.main_success = "Actor deleted."
+                        rerun()
+
+        with rename_col:
+            st.markdown("##### Rename")
+            with st.form("rename_actor"):
+                updated_name = st.text_input(
+                    "Actor name",
+                    value=selected,
+                    key=project_widget_key(f"rename_actor_{selected}"),
+                )
+                renamed = st.form_submit_button("Rename actor", width="stretch")
+                if renamed:
+                    cleaned = updated_name.strip()
+                    if not cleaned:
+                        st.error("Actor name is required.")
+                    elif cleaned != selected and cleaned in project.actors:
+                        st.error("Actor names must be unique.")
+                    elif cleaned != selected:
+                        rename_actor(project, selected, cleaned)
+                        set_project_dirty()
+                        reset_project_ui_state()
+                        close_actor_dialog()
+                        st.session_state.main_success = "Actor renamed and scene references updated."
+                        rerun()
+
+        st.markdown("##### Availability")
+        columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
+        source = pd.DataFrame(project.actors[selected], columns=columns)
+        source.insert(0, "Day", DAYS)
+        edited = st.data_editor(
+            source,
+            hide_index=True,
+            disabled=["Day"],
+            num_rows="fixed",
+            width="stretch",
+            column_config={
+                column: st.column_config.CheckboxColumn(column)
+                for column in columns
+            },
+            key=project_widget_key(f"availability_editor_{selected}"),
+        )
+        if st.button("Apply availability", width="stretch"):
+            project.actors[selected] = [
+                [bool(edited.loc[row_index, column]) for column in columns]
+                for row_index in range(len(DAYS))
+            ]
+            set_project_dirty()
+            st.success("Availability updated.")
+            rerun()
 
 
 def actor_summary(project: ProjectData) -> pd.DataFrame:
@@ -668,13 +768,26 @@ def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
 
-    list_header_col, add_actor_col = st.columns(
-        [0.82, 0.18],
+    list_header_col, actor_action_col = st.columns(
+        [0.68, 0.32],
         vertical_alignment="center",
     )
     with list_header_col:
         st.markdown("#### Actor List")
-    with add_actor_col.container(horizontal_alignment="right"):
+    with actor_action_col.container(
+        horizontal=True,
+        horizontal_alignment="right",
+        gap="small",
+    ):
+        if st.button(
+            "Edit",
+            icon=":material/edit:",
+            help="Edit actor",
+            key="open_edit_actor_dialog",
+            disabled=not actor_names,
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            open_actor_dialog("edit")
         if st.button(
             "Add",
             icon=":material/add:",
@@ -693,66 +806,6 @@ def render_actors_tab() -> None:
 
     if not actor_names:
         return
-
-    selected = st.selectbox("Actor", actor_names, key=project_widget_key("actor_selector"))
-    used_in = [scene.name for scene in project.scenes if selected in scene.actors]
-
-    rename_col, delete_col = st.columns([2, 1])
-    with rename_col.form("rename_actor"):
-        updated_name = st.text_input(
-            "Actor name",
-            value=selected,
-            key=project_widget_key(f"rename_actor_{selected}"),
-        )
-        renamed = st.form_submit_button("Rename actor", width="stretch")
-        if renamed:
-            cleaned = updated_name.strip()
-            if not cleaned:
-                st.error("Actor name is required.")
-            elif cleaned != selected and cleaned in project.actors:
-                st.error("Actor names must be unique.")
-            elif cleaned != selected:
-                rename_actor(project, selected, cleaned)
-                set_project_dirty()
-                st.success("Actor renamed and scene references updated.")
-                rerun()
-
-    with delete_col:
-        st.write("")
-        st.write("")
-        if used_in:
-            st.warning("Remove this actor from scenes before deleting.")
-            st.button("Delete actor", disabled=True, width="stretch")
-        elif st.button("Delete actor", width="stretch"):
-            del project.actors[selected]
-            set_project_dirty()
-            st.success("Actor deleted.")
-            rerun()
-
-    st.markdown("#### Availability")
-    columns = [slot_label(slot_idx) for slot_idx in range(len(SLOT_START_HOURS))]
-    source = pd.DataFrame(project.actors[selected], columns=columns)
-    source.insert(0, "Day", DAYS)
-    edited = st.data_editor(
-        source,
-        hide_index=True,
-        disabled=["Day"],
-        num_rows="fixed",
-        width="stretch",
-        column_config={
-            column: st.column_config.CheckboxColumn(column)
-            for column in columns
-        },
-        key=project_widget_key(f"availability_editor_{selected}"),
-    )
-    if st.button("Apply availability", width="stretch"):
-        project.actors[selected] = [
-            [bool(edited.loc[row_index, column]) for column in columns]
-            for row_index in range(len(DAYS))
-        ]
-        set_project_dirty()
-        st.success("Availability updated.")
-        rerun()
 
 
 def scene_summary(project: ProjectData) -> pd.DataFrame:
