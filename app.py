@@ -1149,18 +1149,12 @@ def render_results_tab() -> None:
 
     if "results_days_filter" not in st.session_state:
         st.session_state.results_days_filter = list(DAYS)
-    if "results_no_weekend_filter" not in st.session_state:
-        st.session_state.results_no_weekend_filter = False
-
     chosen_days = [
         day
         for day in st.session_state.get("results_days_filter", list(DAYS))
         if day in DAYS
     ]
-    no_weekend = bool(st.session_state.get("results_no_weekend_filter", False))
     allowed_day_indexes = {DAYS.index(day) for day in chosen_days}
-    if no_weekend:
-        allowed_day_indexes -= {5, 6}
 
     try:
         results = compute_project_results(project)
@@ -1178,26 +1172,29 @@ def render_results_tab() -> None:
     metric_col2.metric("Scenes with slots", scenes_with_slots)
     metric_col3.metric("Feasible slots", total_slots)
 
-    filter_col1, filter_col2 = st.columns([2, 1])
-    with filter_col1:
-        st.multiselect("Days", list(DAYS), key="results_days_filter")
-    with filter_col2:
-        st.checkbox("Exclude weekends", key="results_no_weekend_filter")
+    current_days = set(chosen_days)
+    day_cols = st.columns(len(DAYS))
+    for day, day_col in zip(DAYS, day_cols):
+        active = day in current_days
+        with day_col:
+            if st.button(
+                day,
+                icon=":material/calendar_today:",
+                type="primary" if active else "secondary",
+                key=f"results_day_toggle_{day}",
+                width="stretch",
+            ):
+                if active:
+                    current_days.remove(day)
+                else:
+                    current_days.add(day)
+                st.session_state.results_days_filter = [
+                    candidate for candidate in DAYS if candidate in current_days
+                ]
+                rerun()
 
     if not allowed_day_indexes:
         st.warning("No days are selected.")
-
-    st.markdown("#### Actor Availability Sheet")
-    if project.actors:
-        render_availability_dataframe(actor_availability_sheet(project, allowed_day_indexes))
-    else:
-        st.info("Add an actor to start building availability.")
-
-    st.markdown("#### Scene Availability Sheet")
-    if project.scenes:
-        render_availability_dataframe(scene_availability_sheet(filtered, allowed_day_indexes))
-    else:
-        st.info("Add a scene to start matching rehearsal slots.")
 
     st.markdown("#### Feasible Slots")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
@@ -1217,6 +1214,18 @@ def render_results_tab() -> None:
         mime="text/plain",
         width="stretch",
     )
+
+    st.markdown("#### Actor Availability Sheet")
+    if project.actors:
+        render_availability_dataframe(actor_availability_sheet(project, allowed_day_indexes))
+    else:
+        st.info("Add an actor to start building availability.")
+
+    st.markdown("#### Scene Availability Sheet")
+    if project.scenes:
+        render_availability_dataframe(scene_availability_sheet(filtered, allowed_day_indexes))
+    else:
+        st.info("Add a scene to start matching rehearsal slots.")
 
 
 def render_advanced_tab() -> None:
