@@ -244,13 +244,15 @@ def render_shell() -> None:
         """
         <style>
           .st-key-delete_dialog_action button:not(:disabled),
-          .st-key-delete_actor_action button:not(:disabled) {
+          .st-key-delete_actor_action button:not(:disabled),
+          .st-key-delete_scene_action button:not(:disabled) {
             background-color: #da3633 !important;
             border-color: #da3633 !important;
             color: white !important;
           }
           .st-key-delete_dialog_action button:not(:disabled):hover,
-          .st-key-delete_actor_action button:not(:disabled):hover {
+          .st-key-delete_actor_action button:not(:disabled):hover,
+          .st-key-delete_scene_action button:not(:disabled):hover {
             background-color: #b62324 !important;
             border-color: #b62324 !important;
             color: white !important;
@@ -901,8 +903,11 @@ def close_scene_dialog() -> None:
 
 
 def render_active_scene_dialog() -> None:
-    if st.session_state.get("active_scene_dialog") == "add":
+    active_dialog = st.session_state.get("active_scene_dialog")
+    if active_dialog == "add":
         add_scene_dialog()
+    elif active_dialog == "edit":
+        edit_scene_dialog()
 
 
 @st.dialog("Add scene", on_dismiss=close_scene_dialog)
@@ -953,17 +958,102 @@ def add_scene_dialog() -> None:
                 rerun()
 
 
-def render_scenes_tab() -> None:
+@st.dialog("Edit scene", on_dismiss=close_scene_dialog)
+def edit_scene_dialog() -> None:
     project = get_project()
     actor_names = list(project.actors)
+    if not project.scenes:
+        st.warning("Add a scene before editing.")
+        return
 
-    list_header_col, add_scene_col = st.columns(
-        [0.82, 0.18],
+    scene_names = [scene.name for scene in project.scenes]
+    selected_name = st.selectbox("Scene", scene_names, key=project_widget_key("scene_selector"))
+    selected_index = scene_names.index(selected_name)
+    selected_scene = project.scenes[selected_index]
+
+    with st.container(border=True):
+        with st.form("edit_scene", border=False):
+            edited_name = st.text_input(
+                "Rename Scene",
+                value=selected_scene.name,
+                key=project_widget_key(f"edit_scene_name_{selected_name}"),
+            )
+            edited_actors = st.multiselect(
+                "Actors",
+                actor_names,
+                default=list(selected_scene.actors),
+                key=project_widget_key(f"edit_scene_actors_{selected_name}"),
+            )
+            edited_duration = st.number_input(
+                "Duration slots",
+                min_value=1,
+                max_value=7,
+                value=selected_scene.duration_slots,
+                step=1,
+                key=project_widget_key(f"edit_scene_duration_{selected_name}"),
+            )
+            saved = st.form_submit_button("Save scene", width="stretch")
+            if saved:
+                cleaned = edited_name.strip()
+                duplicate = any(
+                    scene.name == cleaned and idx != selected_index
+                    for idx, scene in enumerate(project.scenes)
+                )
+                if not cleaned:
+                    st.error("Scene name is required.")
+                elif duplicate:
+                    st.error("Scene names must be unique.")
+                elif not edited_actors:
+                    st.error("Choose at least one actor.")
+                else:
+                    project.scenes[selected_index] = Scene(
+                        name=cleaned,
+                        actors=tuple(edited_actors),
+                        duration_slots=int(edited_duration),
+                    )
+                    set_project_dirty()
+                    reset_project_ui_state()
+                    close_scene_dialog()
+                    st.session_state.main_success = "Scene updated."
+                    rerun()
+
+        with st.container(key="delete_scene_action"):
+            if st.button(
+                "Delete selected scene",
+                icon=":material/delete:",
+                width="stretch",
+            ):
+                del project.scenes[selected_index]
+                set_project_dirty()
+                reset_project_ui_state()
+                close_scene_dialog()
+                st.session_state.main_success = "Scene deleted."
+                rerun()
+
+
+def render_scenes_tab() -> None:
+    project = get_project()
+
+    list_header_col, scene_action_col = st.columns(
+        [0.68, 0.32],
         vertical_alignment="center",
     )
     with list_header_col:
         st.markdown("#### Scene List")
-    with add_scene_col.container(horizontal_alignment="right"):
+    with scene_action_col.container(
+        horizontal=True,
+        horizontal_alignment="right",
+        gap="small",
+    ):
+        if st.button(
+            "Edit",
+            icon=":material/edit:",
+            help="Edit scene",
+            key="open_edit_scene_dialog",
+            disabled=not project.scenes,
+            width=ACTION_BUTTON_WIDTH,
+        ):
+            open_scene_dialog("edit")
         if st.button(
             "Add",
             icon=":material/add:",
@@ -982,61 +1072,6 @@ def render_scenes_tab() -> None:
 
     if not project.scenes:
         return
-
-    st.markdown("#### Edit Scene")
-    scene_names = [scene.name for scene in project.scenes]
-    selected_name = st.selectbox("Scene", scene_names, key=project_widget_key("scene_selector"))
-    selected_index = scene_names.index(selected_name)
-    selected_scene = project.scenes[selected_index]
-
-    with st.form("edit_scene"):
-        edited_name = st.text_input(
-            "Scene name",
-            value=selected_scene.name,
-            key=project_widget_key(f"edit_scene_name_{selected_name}"),
-        )
-        edited_actors = st.multiselect(
-            "Actors",
-            actor_names,
-            default=list(selected_scene.actors),
-            key=project_widget_key(f"edit_scene_actors_{selected_name}"),
-        )
-        edited_duration = st.number_input(
-            "Duration slots",
-            min_value=1,
-            max_value=7,
-            value=selected_scene.duration_slots,
-            step=1,
-            key=project_widget_key(f"edit_scene_duration_{selected_name}"),
-        )
-        saved = st.form_submit_button("Save scene", width="stretch")
-        if saved:
-            cleaned = edited_name.strip()
-            duplicate = any(
-                scene.name == cleaned and idx != selected_index
-                for idx, scene in enumerate(project.scenes)
-            )
-            if not cleaned:
-                st.error("Scene name is required.")
-            elif duplicate:
-                st.error("Scene names must be unique.")
-            elif not edited_actors:
-                st.error("Choose at least one actor.")
-            else:
-                project.scenes[selected_index] = Scene(
-                    name=cleaned,
-                    actors=tuple(edited_actors),
-                    duration_slots=int(edited_duration),
-                )
-                set_project_dirty()
-                st.success("Scene updated.")
-                rerun()
-
-    if st.button("Delete selected scene", width="stretch"):
-        del project.scenes[selected_index]
-        set_project_dirty()
-        st.success("Scene deleted.")
-        rerun()
 
 
 def render_results_tab() -> None:
