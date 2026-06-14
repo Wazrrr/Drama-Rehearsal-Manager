@@ -559,6 +559,44 @@ def rename_actor(project: ProjectData, old_name: str, new_name: str) -> None:
     project.scenes = renamed_scenes
 
 
+def open_actor_dialog(name: str) -> None:
+    st.session_state.active_actor_dialog = name
+
+
+def close_actor_dialog() -> None:
+    st.session_state.pop("active_actor_dialog", None)
+
+
+def render_active_actor_dialog() -> None:
+    if st.session_state.get("active_actor_dialog") == "add":
+        add_actor_dialog()
+
+
+@st.dialog("Add actor", on_dismiss=close_actor_dialog)
+def add_actor_dialog() -> None:
+    project = get_project()
+    with st.form("add_actor_dialog_form"):
+        new_actor = st.text_input("Actor name", key="add_actor_dialog_name")
+        submitted = st.form_submit_button(
+            "Add actor",
+            icon=":material/person_add:",
+            key="add_actor_dialog_submit",
+            width="stretch",
+        )
+        if submitted:
+            cleaned = new_actor.strip()
+            if not cleaned:
+                st.error("Actor name is required.")
+            elif cleaned in project.actors:
+                st.error("Actor names must be unique.")
+            else:
+                project.actors[cleaned] = blank_matrix()
+                set_project_dirty()
+                close_actor_dialog()
+                st.session_state.main_success = f"Added {cleaned}."
+                rerun()
+
+
 def actor_summary(project: ProjectData) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -578,28 +616,27 @@ def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
 
-    st.subheader("Actors")
-    if actor_names:
+    list_header_col, add_actor_col, _ = st.columns(
+        [0.12, 0.05, 0.83],
+        vertical_alignment="center",
+    )
+    with list_header_col:
         st.markdown("#### Actor List")
+    with add_actor_col:
+        if st.button(
+            "",
+            icon=":material/person_add:",
+            help="Add actor",
+            key="open_add_actor_dialog",
+            width="stretch",
+        ):
+            open_actor_dialog("add")
+    render_active_actor_dialog()
+
+    if actor_names:
         st.dataframe(actor_summary(project), hide_index=True, width="stretch")
     else:
         st.info("Add an actor to start building availability.")
-
-    add_col, _ = st.columns([1, 2])
-    with add_col.form("add_actor"):
-        new_actor = st.text_input("New actor name", key=project_widget_key("new_actor_name"))
-        submitted = st.form_submit_button("Add actor", width="stretch")
-        if submitted:
-            cleaned = new_actor.strip()
-            if not cleaned:
-                st.error("Actor name is required.")
-            elif cleaned in project.actors:
-                st.error("Actor names must be unique.")
-            else:
-                project.actors[cleaned] = blank_matrix()
-                set_project_dirty()
-                st.success(f"Added {cleaned}.")
-                rerun()
 
     if not actor_names:
         return
