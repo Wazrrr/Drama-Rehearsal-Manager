@@ -230,6 +230,205 @@ def preserve_copy_shortcut() -> None:
     )
 
 
+def open_drama_dialog(name: str) -> None:
+    st.session_state.active_drama_dialog = name
+
+
+def close_drama_dialog() -> None:
+    st.session_state.pop("active_drama_dialog", None)
+
+
+def render_active_drama_dialog() -> None:
+    active_dialog = st.session_state.get("active_drama_dialog")
+    if active_dialog == "create":
+        create_drama_dialog()
+    elif active_dialog == "rename":
+        rename_drama_dialog()
+    elif active_dialog == "delete":
+        delete_drama_dialog()
+
+
+@st.dialog("Create drama", on_dismiss=close_drama_dialog)
+def create_drama_dialog() -> None:
+    if project_is_dirty():
+        st.warning("Save or discard the current drama before creating another.")
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button(
+            "Save current",
+            icon=":material/save:",
+            key="create_dialog_save_current",
+            width="stretch",
+        ):
+            try:
+                save_current_drama()
+            except DataValidationError as exc:
+                st.error(str(exc))
+            else:
+                close_drama_dialog()
+                st.session_state.sidebar_success = "Drama saved."
+                rerun()
+        if action_col2.button(
+            "Discard changes",
+            icon=":material/undo:",
+            key="create_dialog_discard_changes",
+            width="stretch",
+        ):
+            if has_current_drama():
+                set_current_drama(
+                    load_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR),
+                    reset_ui_state=True,
+                )
+            else:
+                clear_project_dirty()
+            close_drama_dialog()
+            st.session_state.sidebar_success = "Changes discarded."
+            rerun()
+        return
+
+    with st.form("create_drama_dialog_form"):
+        name = st.text_input("Drama name", key="create_dialog_drama_name")
+        submitted = st.form_submit_button(
+            "Create drama",
+            icon=":material/add:",
+            key="create_dialog_submit",
+            width="stretch",
+        )
+        if submitted:
+            try:
+                drama = create_drama(name, LOCAL_DATA_DIR)
+            except DataValidationError as exc:
+                st.error(str(exc))
+            else:
+                set_current_drama(drama, reset_ui_state=True)
+                close_drama_dialog()
+                st.session_state.sidebar_success = "Drama created."
+                rerun()
+
+
+@st.dialog("Rename drama", on_dismiss=close_drama_dialog)
+def rename_drama_dialog() -> None:
+    if not has_current_drama():
+        st.warning("Create or select a drama first.")
+        return
+
+    if project_is_dirty():
+        st.warning("Save or discard changes before renaming this drama.")
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button(
+            "Save current",
+            icon=":material/save:",
+            key="rename_dialog_save_current",
+            width="stretch",
+        ):
+            try:
+                save_current_drama()
+            except DataValidationError as exc:
+                st.error(str(exc))
+            else:
+                close_drama_dialog()
+                st.session_state.sidebar_success = "Drama saved."
+                rerun()
+        if action_col2.button(
+            "Discard changes",
+            icon=":material/undo:",
+            key="rename_dialog_discard_changes",
+            width="stretch",
+        ):
+            set_current_drama(
+                load_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR),
+                reset_ui_state=True,
+            )
+            close_drama_dialog()
+            st.session_state.sidebar_success = "Changes discarded."
+            rerun()
+        return
+
+    with st.form("rename_drama_dialog_form"):
+        name = st.text_input(
+            "Drama name",
+            value=str(st.session_state.current_drama_name),
+            key="rename_dialog_drama_name",
+        )
+        submitted = st.form_submit_button(
+            "Rename drama",
+            icon=":material/edit:",
+            key="rename_dialog_submit",
+            width="stretch",
+        )
+        if submitted:
+            try:
+                drama = rename_drama(str(st.session_state.current_drama_id), name, LOCAL_DATA_DIR)
+            except DataValidationError as exc:
+                st.error(str(exc))
+            else:
+                set_current_drama(drama, reset_ui_state=False)
+                close_drama_dialog()
+                st.session_state.sidebar_success = "Drama renamed."
+                rerun()
+
+
+@st.dialog("Delete drama", on_dismiss=close_drama_dialog)
+def delete_drama_dialog() -> None:
+    if not has_current_drama():
+        st.warning("Create or select a drama first.")
+        return
+
+    if project_is_dirty():
+        st.warning("Save or discard changes before deleting this drama.")
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button(
+            "Save current",
+            icon=":material/save:",
+            key="delete_dialog_save_current",
+            width="stretch",
+        ):
+            try:
+                save_current_drama()
+            except DataValidationError as exc:
+                st.error(str(exc))
+            else:
+                close_drama_dialog()
+                st.session_state.sidebar_success = "Drama saved."
+                rerun()
+        if action_col2.button(
+            "Discard changes",
+            icon=":material/undo:",
+            key="delete_dialog_discard_changes",
+            width="stretch",
+        ):
+            set_current_drama(
+                load_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR),
+                reset_ui_state=True,
+            )
+            close_drama_dialog()
+            st.session_state.sidebar_success = "Changes discarded."
+            rerun()
+        return
+
+    st.warning(f"Delete `{st.session_state.current_drama_name}` permanently?")
+    confirm_name = st.text_input(
+        "Type the drama name to confirm",
+        key="delete_dialog_confirm_name",
+    )
+    delete_disabled = confirm_name != str(st.session_state.current_drama_name)
+    if st.button(
+        "Delete drama",
+        icon=":material/delete:",
+        key="delete_dialog_submit",
+        disabled=delete_disabled,
+        width="stretch",
+    ):
+        delete_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR)
+        next_drama = choose_initial_drama(LOCAL_DATA_DIR)
+        if next_drama is None:
+            clear_current_drama()
+        else:
+            set_current_drama(next_drama, reset_ui_state=True)
+        close_drama_dialog()
+        st.session_state.sidebar_success = "Drama deleted."
+        rerun()
+
+
 def render_sidebar() -> None:
     project = get_project()
 
@@ -249,10 +448,8 @@ def render_sidebar() -> None:
     current_id = st.session_state.get("current_drama_id")
     dirty = project_is_dirty()
 
-    if has_current_drama():
-        st.sidebar.caption(f"Current drama: `{st.session_state.current_drama_name}`")
-        if dirty:
-            st.sidebar.warning("This drama has unsaved changes.")
+    if has_current_drama() and dirty:
+        st.sidebar.warning("This drama has unsaved changes.")
 
     if summaries and has_current_drama():
         options = [summary.id for summary in summaries]
@@ -301,8 +498,39 @@ def render_sidebar() -> None:
                     st.session_state.sidebar_success = "Switched drama."
                     rerun()
 
+    create_col, rename_col, delete_col, save_col = st.sidebar.columns(4)
+    if create_col.button(
+        "",
+        icon=":material/add:",
+        help="Create drama",
+        width="stretch",
+    ):
+        open_drama_dialog("create")
+    if rename_col.button(
+        "",
+        icon=":material/edit:",
+        help="Rename drama",
+        disabled=not has_current_drama(),
+        width="stretch",
+    ):
+        open_drama_dialog("rename")
+    if delete_col.button(
+        "",
+        icon=":material/delete:",
+        help="Delete drama",
+        disabled=not has_current_drama(),
+        width="stretch",
+    ):
+        open_drama_dialog("delete")
+
     save_disabled = not has_current_drama() or not can_save or not dirty
-    if st.sidebar.button("Save drama", disabled=save_disabled, width="stretch"):
+    if save_col.button(
+        "",
+        icon=":material/save:",
+        help="Save drama",
+        disabled=save_disabled,
+        width="stretch",
+    ):
         try:
             save_current_drama()
         except DataValidationError as exc:
@@ -311,71 +539,7 @@ def render_sidebar() -> None:
             st.session_state.sidebar_success = "Drama saved."
             rerun()
 
-    with st.sidebar.expander("Create drama", expanded=not has_current_drama()):
-        with st.form("create_drama"):
-            new_drama_name = st.text_input("Drama name")
-            submitted = st.form_submit_button("Create drama", width="stretch")
-            if submitted:
-                if dirty:
-                    st.error("Save or discard the current drama before creating another.")
-                else:
-                    try:
-                        drama = create_drama(new_drama_name, LOCAL_DATA_DIR)
-                    except DataValidationError as exc:
-                        st.error(str(exc))
-                    else:
-                        set_current_drama(drama, reset_ui_state=True)
-                        st.session_state.sidebar_success = "Drama created."
-                        rerun()
-
-    if not has_current_drama():
-        return
-
-    with st.sidebar.expander("Rename drama"):
-        with st.form("rename_drama"):
-            renamed_drama = st.text_input(
-                "Drama name",
-                value=str(st.session_state.current_drama_name),
-            )
-            submitted = st.form_submit_button(
-                "Rename drama",
-                disabled=dirty,
-                width="stretch",
-            )
-            if submitted:
-                try:
-                    drama = rename_drama(str(current_id), renamed_drama, LOCAL_DATA_DIR)
-                except DataValidationError as exc:
-                    st.error(str(exc))
-                else:
-                    set_current_drama(drama, reset_ui_state=False)
-                    st.session_state.sidebar_success = "Drama renamed."
-                    rerun()
-        if dirty:
-            st.caption("Save or discard changes before renaming.")
-
-    with st.sidebar.expander("Delete drama"):
-        confirm_delete = st.checkbox(
-            "Delete this drama permanently",
-            key="confirm_delete_drama",
-            disabled=dirty,
-        )
-        if dirty:
-            st.caption("Save or discard changes before deleting.")
-        if st.button(
-            "Delete drama",
-            disabled=dirty or not confirm_delete,
-            width="stretch",
-        ):
-            delete_drama(str(current_id), LOCAL_DATA_DIR)
-            next_drama = choose_initial_drama(LOCAL_DATA_DIR)
-            if next_drama is None:
-                clear_current_drama()
-                st.session_state.sidebar_success = "Drama deleted."
-            else:
-                set_current_drama(next_drama, reset_ui_state=True)
-                st.session_state.sidebar_success = "Drama deleted."
-            rerun()
+    render_active_drama_dialog()
 
 
 def rename_actor(project: ProjectData, old_name: str, new_name: str) -> None:
