@@ -559,11 +559,32 @@ def rename_actor(project: ProjectData, old_name: str, new_name: str) -> None:
     project.scenes = renamed_scenes
 
 
+def actor_summary(project: ProjectData) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Actor": actor_name,
+                "Scenes": ", ".join(
+                    scene.name for scene in project.scenes if actor_name in scene.actors
+                )
+                or "none",
+            }
+            for actor_name in project.actors
+        ]
+    )
+
+
 def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
 
     st.subheader("Actors")
+    if actor_names:
+        st.markdown("#### Actor List")
+        st.dataframe(actor_summary(project), hide_index=True, width="stretch")
+    else:
+        st.info("Add an actor to start building availability.")
+
     add_col, _ = st.columns([1, 2])
     with add_col.form("add_actor"):
         new_actor = st.text_input("New actor name", key=project_widget_key("new_actor_name"))
@@ -581,7 +602,6 @@ def render_actors_tab() -> None:
                 rerun()
 
     if not actor_names:
-        st.info("Add an actor to start building availability.")
         return
 
     selected = st.selectbox("Actor", actor_names, key=project_widget_key("actor_selector"))
@@ -664,6 +684,7 @@ def render_scenes_tab() -> None:
 
     st.subheader("Scenes")
     if project.scenes:
+        st.markdown("#### Scene List")
         st.dataframe(scene_summary(project), hide_index=True, width="stretch")
     else:
         st.info("Add a scene to start matching rehearsal slots.")
