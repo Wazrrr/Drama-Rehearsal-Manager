@@ -18,10 +18,8 @@ from app_services import (
     export_results_json,
     export_results_text,
     load_default_project,
-    load_project,
     parse_project_payloads,
     result_rows,
-    save_project,
     scenes_to_jsonable,
     validate_project,
 )
@@ -31,10 +29,9 @@ from models import Scene
 from storage_backends import GoogleSheetsConfig, GoogleSheetsStorage, StorageError
 from time_grid import DAYS, SLOT_START_HOURS, slot_label
 
-LOCAL_ACTORS_PATH = Path("private_data/actors.json")
-LOCAL_SCENES_PATH = Path("private_data/scenes.json")
 LOCAL_GOOGLE_CREDENTIALS_PATH = Path(".streamlit/google_service_account.json")
 LOCAL_GOOGLE_CONFIG_PATH = Path(".streamlit/google_sheets.json")
+PROJECT_ROOT = Path.cwd()
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -90,15 +87,10 @@ def get_project() -> ProjectData:
     return st.session_state.project
 
 
-def load_local_project() -> ProjectData:
-    missing_paths = [
-        str(path)
-        for path in (LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
-        if not path.exists()
-    ]
-    if missing_paths:
-        raise DataValidationError(f"Missing local JSON file(s): {', '.join(missing_paths)}")
-    return load_project(LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
+def parse_uploaded_project_files(actors_file, scenes_file) -> ProjectData:
+    actors_payload = json.loads(actors_file.getvalue().decode("utf-8"))
+    scenes_payload = json.loads(scenes_file.getvalue().decode("utf-8"))
+    return parse_project_payloads(actors_payload, scenes_payload)
 
 
 def initialize_state() -> None:
@@ -332,21 +324,45 @@ def render_sidebar() -> None:
         st.sidebar.error(str(exc))
 
     if storage_backend == "Local JSON":
-        if st.sidebar.button("Load from local JSON", width="stretch"):
-            try:
-                loaded = load_local_project()
-            except DataValidationError as exc:
-                st.sidebar.error(str(exc))
-            else:
-                set_project(loaded, reset_ui_state=True)
-                st.session_state.loaded_paths = (str(LOCAL_ACTORS_PATH), str(LOCAL_SCENES_PATH))
-                st.session_state.sidebar_success = "Loaded local project files."
-                rerun()
+        st.sidebar.caption(f"Current folder: `{PROJECT_ROOT}`")
+        selected_actors_file = st.sidebar.file_uploader(
+            "Actors JSON",
+            type="json",
+            key="local_actors_json_file",
+            help=(
+                "Choose the actors JSON file from your computer. Browsers do not expose "
+                "the original filesystem path to Streamlit."
+            ),
+        )
+        selected_scenes_file = st.sidebar.file_uploader(
+            "Scenes JSON",
+            type="json",
+            key="local_scenes_json_file",
+            help=(
+                "Choose the scenes JSON file from your computer. Browsers do not expose "
+                "the original filesystem path to Streamlit."
+            ),
+        )
 
-        if st.sidebar.button("Save to local JSON", disabled=not can_save, width="stretch"):
-            save_project(project, LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
-            st.session_state.loaded_paths = (str(LOCAL_ACTORS_PATH), str(LOCAL_SCENES_PATH))
-            st.sidebar.success("Saved private_data/actors.json and private_data/scenes.json.")
+        if st.sidebar.button("Load uploaded JSON", width="stretch"):
+            if selected_actors_file is None or selected_scenes_file is None:
+                st.sidebar.error("Upload both actors and scenes JSON files.")
+            else:
+                try:
+                    loaded = parse_uploaded_project_files(
+                        selected_actors_file,
+                        selected_scenes_file,
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
+                    st.sidebar.error(f"Load failed: {exc}")
+                else:
+                    set_project(loaded, reset_ui_state=True)
+                    st.session_state.loaded_paths = (
+                        f"uploaded: {selected_actors_file.name}",
+                        f"uploaded: {selected_scenes_file.name}",
+                    )
+                    st.session_state.sidebar_success = "Loaded uploaded project JSON."
+                    rerun()
 
     if storage_backend == "Google Sheets":
         credentials_present = google_service_account_credentials() is not None
@@ -722,9 +738,10 @@ def render_json_tab() -> None:
             st.error("Upload both actors and scenes JSON files.")
         else:
             try:
-                actors_payload = json.loads(actors_file.getvalue().decode("utf-8"))
-                scenes_payload = json.loads(scenes_file.getvalue().decode("utf-8"))
-                set_project(parse_project_payloads(actors_payload, scenes_payload), reset_ui_state=True)
+                set_project(
+                    parse_uploaded_project_files(actors_file, scenes_file),
+                    reset_ui_state=True,
+                )
             except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
                 st.error(f"Import failed: {exc}")
             else:

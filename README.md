@@ -88,9 +88,12 @@ The app opens in a browser and lets you:
 - run the matcher with day filters
 - choose Local JSON or Google Sheets storage
 - download actors, scenes, and result reports as JSON/text
-- save the current project to `private_data/actors.json` and `private_data/scenes.json`
+- load actors/scenes JSON files uploaded from your computer
+- download edited actors/scenes JSON files
 
-On startup, the app loads `data/actors.sample.json` and `data/scenes.sample.json`. Use the `Local JSON` sidebar controls to load from or save to `private_data/actors.json` and `private_data/scenes.json`.
+On startup, the app loads `data/actors.sample.json` and `data/scenes.sample.json`. Use the `Local JSON` sidebar controls to upload actors/scenes JSON files from your computer.
+
+Browser upload controls do not expose the original filesystem path to Streamlit, so the app records the uploaded filenames in the loaded-source display but cannot overwrite the original files directly. Use the download buttons to write edited JSON files back to your computer.
 
 ## Google Sheets Storage
 
