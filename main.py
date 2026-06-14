@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from day_filters import filter_results_by_day_indexes, resolve_allowed_day_indexes
+from drama_storage import load_drama_file
 from loader import DataValidationError, load_actor_availability, load_scenes
 from matcher import compute_all_scene_feasibility
 from report import format_human_readable, format_json
@@ -18,8 +19,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "(Mon-Sun, 10:00-24:00, 2-hour intervals)."
         )
     )
-    parser.add_argument("--actors", required=True, help="Path to actors JSON file")
-    parser.add_argument("--scenes", required=True, help="Path to scenes JSON file")
+    parser.add_argument("--drama", help="Path to a drama JSON file")
+    parser.add_argument("--actors", help="Path to actors JSON file")
+    parser.add_argument("--scenes", help="Path to scenes JSON file")
     parser.add_argument(
         "--format",
         default="human",
@@ -52,8 +54,19 @@ def run(argv: list[str]) -> int:
     try:
         args = parse_args(argv)
         allowed_day_indexes = resolve_day_filter(args)
-        actor_availability = load_actor_availability(args.actors)
-        scenes = load_scenes(args.scenes, set(actor_availability))
+        has_drama_input = bool(args.drama)
+        has_legacy_input = bool(args.actors or args.scenes)
+        if has_drama_input and has_legacy_input:
+            raise DataValidationError("provide either --drama, or --actors and --scenes, not both")
+        if has_drama_input:
+            project = load_drama_file(args.drama).project
+            actor_availability = project.actors
+            scenes = project.scenes
+        elif args.actors and args.scenes:
+            actor_availability = load_actor_availability(args.actors)
+            scenes = load_scenes(args.scenes, set(actor_availability))
+        else:
+            raise DataValidationError("provide --drama, or both --actors and --scenes")
     except (DataValidationError, ValueError) as exc:
         print(f"Input error: {exc}", file=sys.stderr)
         return 2

@@ -50,9 +50,18 @@ def load_default_project() -> LoadedProject:
     )
 
 
-def parse_project_payloads(actor_payload: object, scene_payload: object) -> ProjectData:
-    actors = parse_actor_availability(actor_payload)
-    scenes = parse_scenes(scene_payload, set(actors))
+def empty_project() -> ProjectData:
+    return ProjectData(actors={}, scenes=[])
+
+
+def parse_project_payloads(
+    actor_payload: object,
+    scene_payload: object,
+    *,
+    allow_empty: bool = False,
+) -> ProjectData:
+    actors = parse_actor_availability(actor_payload, allow_empty=allow_empty)
+    scenes = parse_scenes(scene_payload, set(actors), allow_empty=allow_empty)
     return ProjectData(actors=actors, scenes=scenes)
 
 
@@ -96,15 +105,16 @@ def save_project(
     scenes_dst.write_text(dump_scenes_json(project.scenes), encoding="utf-8")
 
 
-def validate_project(project: ProjectData) -> ProjectData:
+def validate_project(project: ProjectData, *, allow_empty: bool = False) -> ProjectData:
     return parse_project_payloads(
         actors_to_jsonable(project.actors),
         scenes_to_jsonable(project.scenes),
+        allow_empty=allow_empty,
     )
 
 
 def compute_project_results(project: ProjectData) -> dict[str, list[FeasibleSlot]]:
-    validated = validate_project(project)
+    validated = validate_project(project, allow_empty=True)
     return compute_all_scene_feasibility(validated.scenes, validated.actors)
 
 

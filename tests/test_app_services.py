@@ -10,25 +10,41 @@ from app_services import (
     compute_project_results,
     dump_actors_json,
     dump_scenes_json,
+    empty_project,
     load_project,
     parse_project_payloads,
     save_project,
 )
 from day_filters import filter_results_by_day_indexes, resolve_allowed_day_indexes
+from drama_storage import (
+    Drama,
+    choose_initial_drama,
+    create_drama,
+    delete_drama,
+    dump_drama_json,
+    list_dramas,
+    load_drama,
+    load_drama_file,
+    parse_drama_payload,
+    read_last_drama_id,
+    remember_last_drama_id,
+    rename_drama,
+    save_drama,
+)
 from loader import DataValidationError
 from models import Scene
-from storage_backends import (
-    ACTOR_NAME_HEADER,
-    SCENE_HEADERS,
-    availability_headers,
-    project_from_sheet_values,
-    project_to_sheet_values,
-)
 from time_grid import DAYS_PER_WEEK, SLOTS_PER_DAY
 
 
 def blank_matrix(value: int = 0) -> list[list[int]]:
     return [[value for _ in range(SLOTS_PER_DAY)] for _ in range(DAYS_PER_WEEK)]
+
+
+def project_fixture() -> ProjectData:
+    return ProjectData(
+        actors={"Alice": blank_matrix(1)},
+        scenes=[Scene(name="Scene", actors=("Alice",), duration_slots=1)],
+    )
 
 
 class AppServicesTests(unittest.TestCase):
@@ -93,41 +109,84 @@ class AppServicesTests(unittest.TestCase):
         self.assertEqual(len(filtered["Scene"]), 1)
         self.assertEqual(filtered["Scene"][0].day_index, 0)
 
-    def test_project_to_sheet_values_uses_editable_headers(self) -> None:
-        project = ProjectData(
-            actors={"Alice": blank_matrix(1)},
-            scenes=[Scene(name="Scene", actors=("Alice",), duration_slots=1)],
+    def test_parse_project_payloads_allows_empty_when_requested(self) -> None:
+        project = parse_project_payloads({}, [], allow_empty=True)
+
+        self.assertEqual(project, empty_project())
+
+    def test_drama_json_preserves_project_data(self) -> None:
+        drama = Drama(
+            id="my-drama",
+            name="My Drama",
+            created_at="2026-06-14T00:00:00Z",
+            updated_at="2026-06-14T00:00:00Z",
+            project=project_fixture(),
         )
 
-        actor_rows, scene_rows = project_to_sheet_values(project)
+        parsed = parse_drama_payload(json.loads(dump_drama_json(drama)))
 
-        self.assertEqual(actor_rows[0], [ACTOR_NAME_HEADER, *availability_headers()])
-        self.assertEqual(actor_rows[1][0], "Alice")
-        self.assertEqual(scene_rows[0], list(SCENE_HEADERS))
-        self.assertEqual(scene_rows[1], ["Scene", "Alice", "1"])
+        self.assertEqual(parsed.id, "my-drama")
+        self.assertEqual(parsed.name, "My Drama")
+        self.assertEqual(parsed.project.scenes, drama.project.scenes)
+        self.assertEqual(parsed.project.actors["Alice"][0][0], True)
 
-    def test_project_from_sheet_values_accepts_blank_availability_as_false(self) -> None:
-        actor_rows = [[ACTOR_NAME_HEADER, *availability_headers()]]
-        actor_rows.append(["Alice", *["" for _ in availability_headers()]])
-        scene_rows = [list(SCENE_HEADERS), ["Scene", "Alice", "1"]]
+    def test_create_list_load_and_save_drama_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            drama = create_drama("My Drama", data_dir, project=project_fixture())
+            summaries = list_dramas(data_dir)
 
-        project = project_from_sheet_values(actor_rows, scene_rows)
+            self.assertEqual([summary.name for summary in summaries], ["My Drama"])
 
-        self.assertEqual(list(project.actors), ["Alice"])
-        self.assertFalse(project.actors["Alice"][0][0])
-        self.assertEqual(project.scenes, [Scene(name="Scene", actors=("Alice",), duration_slots=1)])
+            loaded = load_drama(drama.id, data_dir)
+            loaded.project.scenes.append(
+                Scene(name="Second", actors=("Alice",), duration_slots=2)
+            )
+            saved = save_drama(loaded, data_dir)
+            reloaded = load_drama(saved.id, data_dir)
 
-    def test_project_from_sheet_values_accepts_json_actor_list(self) -> None:
-        actor_rows = [
-            [ACTOR_NAME_HEADER, *availability_headers()],
-            ["Alice", *["TRUE" for _ in availability_headers()]],
-            ["Bob", *["TRUE" for _ in availability_headers()]],
-        ]
-        scene_rows = [list(SCENE_HEADERS), ["Scene", '["Alice", "Bob"]', "2"]]
+        self.assertEqual(reloaded.project.scenes[-1].name, "Second")
 
-        project = project_from_sheet_values(actor_rows, scene_rows)
+    def test_rename_drama_preserves_id_and_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            drama = create_drama("Old Name", data_dir, project=project_fixture())
 
-        self.assertEqual(project.scenes, [Scene(name="Scene", actors=("Alice", "Bob"), duration_slots=2)])
+            renamed = rename_drama(drama.id, "New Name", data_dir)
+
+        self.assertEqual(renamed.id, drama.id)
+        self.assertEqual(renamed.name, "New Name")
+        self.assertEqual(renamed.project.scenes, drama.project.scenes)
+
+    def test_delete_drama_clears_last_selected_drama(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            drama = create_drama("Delete Me", data_dir)
+            remember_last_drama_id(drama.id, data_dir)
+
+            delete_drama(drama.id, data_dir)
+
+            self.assertEqual(list_dramas(data_dir), [])
+            self.assertIsNone(read_last_drama_id(data_dir))
+
+    def test_choose_initial_drama_falls_back_from_invalid_last_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            drama = create_drama("Fallback", data_dir)
+            remember_last_drama_id("missing-drama", data_dir)
+
+            chosen = choose_initial_drama(data_dir)
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, drama.id)
+
+    def test_broken_drama_json_raises_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken.json"
+            path.write_text("{broken", encoding="utf-8")
+
+            with self.assertRaises(DataValidationError):
+                load_drama_file(path)
 
 
 if __name__ == "__main__":

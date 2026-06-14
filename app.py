@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -15,23 +14,34 @@ from app_services import (
     compute_project_results,
     dump_actors_json,
     dump_scenes_json,
+    empty_project,
     export_results_json,
     export_results_text,
-    load_default_project,
     parse_project_payloads,
     result_rows,
     scenes_to_jsonable,
     validate_project,
 )
 from day_filters import filter_results_by_day_indexes
+from drama_storage import (
+    DEFAULT_LOCAL_DATA_DIR,
+    Drama,
+    choose_initial_drama,
+    create_drama,
+    delete_drama,
+    dump_drama_json,
+    list_dramas,
+    load_drama,
+    parse_drama_payload,
+    remember_last_drama_id,
+    rename_drama,
+    save_drama,
+)
 from loader import DataValidationError
 from models import Scene
-from storage_backends import GoogleSheetsConfig, GoogleSheetsStorage, StorageError
 from time_grid import DAYS, SLOT_START_HOURS, slot_label
 
-LOCAL_GOOGLE_CREDENTIALS_PATH = Path(".streamlit/google_service_account.json")
-LOCAL_GOOGLE_CONFIG_PATH = Path(".streamlit/google_sheets.json")
-PROJECT_ROOT = Path.cwd()
+LOCAL_DATA_DIR = DEFAULT_LOCAL_DATA_DIR
 PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
 PROJECT_UI_KEY_PREFIXES = (
     "new_actor_name_",
@@ -87,10 +97,73 @@ def get_project() -> ProjectData:
     return st.session_state.project
 
 
+def has_current_drama() -> bool:
+    return bool(st.session_state.get("current_drama_id"))
+
+
+def set_project_dirty() -> None:
+    st.session_state.project_dirty = True
+
+
+def clear_project_dirty() -> None:
+    st.session_state.project_dirty = False
+
+
+def project_is_dirty() -> bool:
+    return bool(st.session_state.get("project_dirty", False))
+
+
+def current_drama() -> Drama:
+    if not has_current_drama():
+        raise DataValidationError("Create or select a drama first.")
+    return Drama(
+        id=str(st.session_state.current_drama_id),
+        name=str(st.session_state.current_drama_name),
+        created_at=str(st.session_state.current_drama_created_at),
+        updated_at=str(st.session_state.current_drama_updated_at),
+        project=get_project(),
+    )
+
+
+def set_current_drama(drama: Drama, *, reset_ui_state: bool = False) -> None:
+    st.session_state.current_drama_id = drama.id
+    st.session_state.current_drama_name = drama.name
+    st.session_state.current_drama_created_at = drama.created_at
+    st.session_state.current_drama_updated_at = drama.updated_at
+    set_project(drama.project, reset_ui_state=reset_ui_state)
+    clear_project_dirty()
+    remember_last_drama_id(drama.id, LOCAL_DATA_DIR)
+
+
+def clear_current_drama() -> None:
+    for key in (
+        "current_drama_id",
+        "current_drama_name",
+        "current_drama_created_at",
+        "current_drama_updated_at",
+    ):
+        st.session_state.pop(key, None)
+    set_project(empty_project(), reset_ui_state=True)
+    clear_project_dirty()
+
+
+def save_current_drama() -> Drama:
+    saved = save_drama(current_drama(), LOCAL_DATA_DIR)
+    st.session_state.current_drama_updated_at = saved.updated_at
+    clear_project_dirty()
+    remember_last_drama_id(saved.id, LOCAL_DATA_DIR)
+    return saved
+
+
 def parse_uploaded_project_files(actors_file, scenes_file) -> ProjectData:
     actors_payload = json.loads(actors_file.getvalue().decode("utf-8"))
     scenes_payload = json.loads(scenes_file.getvalue().decode("utf-8"))
     return parse_project_payloads(actors_payload, scenes_payload)
+
+
+def parse_uploaded_drama_file(drama_file) -> Drama:
+    payload = json.loads(drama_file.getvalue().decode("utf-8"))
+    return parse_drama_payload(payload)
 
 
 def initialize_state() -> None:
@@ -98,16 +171,19 @@ def initialize_state() -> None:
         return
 
     try:
-        loaded = load_default_project()
+        drama = choose_initial_drama(LOCAL_DATA_DIR)
     except DataValidationError as exc:
         st.session_state.load_error = str(exc)
-        st.session_state.project = ProjectData(actors={}, scenes=[])
-        st.session_state.loaded_paths = ("none", "none")
+        st.session_state.project = empty_project()
+        clear_project_dirty()
         return
 
-    st.session_state.project = loaded.data
-    st.session_state.loaded_paths = (str(loaded.actors_path), str(loaded.scenes_path))
     st.session_state.load_error = None
+    if drama is None:
+        st.session_state.project = empty_project()
+        clear_project_dirty()
+    else:
+        set_current_drama(drama, reset_ui_state=True)
 
 
 def rerun() -> None:
@@ -154,317 +230,151 @@ def preserve_copy_shortcut() -> None:
     )
 
 
-def _load_json_file(path: Path) -> dict[str, object] | None:
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _save_json_file(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _validate_google_credentials(payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict):
-        raise ValueError("service account credentials must be a JSON object")
-    missing = [
-        field
-        for field in ("type", "client_email", "private_key")
-        if not str(payload.get(field, "")).strip()
-    ]
-    if missing:
-        raise ValueError(f"service account JSON is missing: {', '.join(missing)}")
-    if payload.get("type") != "service_account":
-        raise ValueError("service account JSON must have type = service_account")
-    return dict(payload)
-
-
-def _parse_credentials_input(uploaded_file, pasted_json: str) -> dict[str, object]:
-    if uploaded_file is not None:
-        raw = uploaded_file.getvalue().decode("utf-8")
-    else:
-        raw = pasted_json.strip()
-    if not raw:
-        raise ValueError("upload or paste a Google service account JSON file")
-    return _validate_google_credentials(json.loads(raw))
-
-
-def local_google_credentials() -> dict[str, object] | None:
-    payload = _load_json_file(LOCAL_GOOGLE_CREDENTIALS_PATH)
-    if payload is None:
-        return None
-    try:
-        return _validate_google_credentials(payload)
-    except ValueError:
-        return None
-
-
-def local_google_spreadsheet_id() -> str:
-    payload = _load_json_file(LOCAL_GOOGLE_CONFIG_PATH) or {}
-    return str(payload.get("spreadsheet_id", "")).strip()
-
-
-def remember_google_spreadsheet_id(spreadsheet_id: str) -> None:
-    cleaned = spreadsheet_id.strip()
-    if cleaned:
-        _save_json_file(LOCAL_GOOGLE_CONFIG_PATH, {"spreadsheet_id": cleaned})
-
-
-def google_credentials_source() -> str:
-    if st.session_state.get("google_service_account_credentials"):
-        return "website input"
-    try:
-        if "google_service_account" in st.secrets:
-            return "Streamlit secrets"
-    except FileNotFoundError:
-        pass
-    if local_google_credentials() is not None:
-        return "local .streamlit file"
-    return "none"
-
-
-def google_service_account_credentials() -> dict[str, object] | None:
-    session_credentials = st.session_state.get("google_service_account_credentials")
-    if session_credentials:
-        return dict(session_credentials)
-    try:
-        credentials = st.secrets["google_service_account"]
-    except (FileNotFoundError, KeyError):
-        return local_google_credentials()
-    return dict(credentials)
-
-
-def default_google_spreadsheet_id() -> str:
-    try:
-        config = st.secrets.get("google_sheets", {})
-    except FileNotFoundError:
-        return local_google_spreadsheet_id()
-    return str(config.get("spreadsheet_id", "")).strip() or local_google_spreadsheet_id()
-
-
-def google_storage(spreadsheet_id: str) -> GoogleSheetsStorage:
-    credentials = google_service_account_credentials()
-    if not credentials:
-        raise StorageError("Missing [google_service_account] credentials in Streamlit secrets.")
-    if not spreadsheet_id.strip():
-        raise StorageError("Google Sheets storage requires a spreadsheet ID.")
-    return GoogleSheetsStorage(
-        GoogleSheetsConfig(spreadsheet_id=spreadsheet_id.strip(), credentials=credentials)
-    )
-
-
-def render_google_sheets_tutorial() -> None:
-    with st.sidebar.expander("Google Sheets setup guide"):
-        st.markdown(
-            """
-            1. In Google Cloud Console, enable **Google Sheets API** and **Google Drive API**.
-            2. Create a **service account**.
-            3. Create and download a **JSON key** for that service account.
-            4. Open your Google Sheet and share it with the service account `client_email` as an editor.
-            5. Copy the spreadsheet ID from the sheet URL and paste it above.
-            6. Upload or paste the downloaded service account JSON below.
-
-            Spreadsheet URL shape:
-
-            `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`
-
-            Required worksheets:
-
-            - `actors`
-            - `scenes`
-
-            If the worksheets do not exist, save to Google Sheets once and the app will create them.
-            """
-        )
-        st.code(
-            """{
-  "type": "service_account",
-  "project_id": "your-project-id",
-  "private_key_id": "your-private-key-id",
-  "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n",
-  "client_email": "your-service-account@your-project.iam.gserviceaccount.com",
-  "client_id": "your-client-id",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/...",
-  "universe_domain": "googleapis.com"
-}""",
-            language="json",
-        )
-
-
 def render_sidebar() -> None:
     project = get_project()
-    loaded_actors, loaded_scenes = st.session_state.get("loaded_paths", ("none", "none"))
 
-    st.sidebar.header("Storage")
-    storage_backend = st.sidebar.selectbox(
-        "Storage backend",
-        ["Local JSON", "Google Sheets"],
-        key="storage_backend",
-    )
-    st.sidebar.caption(f"Loaded actors: `{loaded_actors}`")
-    st.sidebar.caption(f"Loaded scenes: `{loaded_scenes}`")
+    st.sidebar.header("Dramas")
     sidebar_success = pop_session_value("sidebar_success")
     if sidebar_success:
         st.sidebar.success(str(sidebar_success))
 
     try:
-        validate_project(project)
+        validate_project(project, allow_empty=True)
         can_save = True
     except DataValidationError as exc:
         can_save = False
         st.sidebar.error(str(exc))
 
-    if storage_backend == "Local JSON":
-        st.sidebar.caption(f"Current folder: `{PROJECT_ROOT}`")
-        selected_actors_file = st.sidebar.file_uploader(
-            "Actors JSON",
-            type="json",
-            key="local_actors_json_file",
-            help=(
-                "Choose the actors JSON file from your computer. Browsers do not expose "
-                "the original filesystem path to Streamlit."
-            ),
-        )
-        selected_scenes_file = st.sidebar.file_uploader(
-            "Scenes JSON",
-            type="json",
-            key="local_scenes_json_file",
-            help=(
-                "Choose the scenes JSON file from your computer. Browsers do not expose "
-                "the original filesystem path to Streamlit."
-            ),
-        )
+    summaries = list_dramas(LOCAL_DATA_DIR)
+    current_id = st.session_state.get("current_drama_id")
+    dirty = project_is_dirty()
 
-        if st.sidebar.button("Load uploaded JSON", width="stretch"):
-            if selected_actors_file is None or selected_scenes_file is None:
-                st.sidebar.error("Upload both actors and scenes JSON files.")
+    if has_current_drama():
+        st.sidebar.caption(f"Current drama: `{st.session_state.current_drama_name}`")
+        if dirty:
+            st.sidebar.warning("This drama has unsaved changes.")
+
+    if summaries and has_current_drama():
+        options = [summary.id for summary in summaries]
+        labels = {summary.id: summary.name for summary in summaries}
+        index = options.index(current_id) if current_id in options else 0
+        selected_id = st.sidebar.selectbox(
+            "Drama",
+            options,
+            index=index,
+            format_func=lambda drama_id: labels.get(drama_id, drama_id),
+            key="drama_selector",
+        )
+        if selected_id != current_id:
+            if dirty:
+                st.sidebar.warning("Save or discard changes before switching dramas.")
+                switch_col1, switch_col2 = st.sidebar.columns(2)
+                if switch_col1.button("Save and switch", width="stretch"):
+                    try:
+                        save_current_drama()
+                        set_current_drama(
+                            load_drama(selected_id, LOCAL_DATA_DIR),
+                            reset_ui_state=True,
+                        )
+                    except DataValidationError as exc:
+                        st.sidebar.error(str(exc))
+                    else:
+                        st.session_state.sidebar_success = "Saved and switched drama."
+                        rerun()
+                if switch_col2.button("Discard and switch", width="stretch"):
+                    try:
+                        set_current_drama(
+                            load_drama(selected_id, LOCAL_DATA_DIR),
+                            reset_ui_state=True,
+                        )
+                    except DataValidationError as exc:
+                        st.sidebar.error(str(exc))
+                    else:
+                        st.session_state.sidebar_success = "Switched drama."
+                        rerun()
             else:
                 try:
-                    loaded = parse_uploaded_project_files(
-                        selected_actors_file,
-                        selected_scenes_file,
-                    )
-                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
-                    st.sidebar.error(f"Load failed: {exc}")
+                    set_current_drama(load_drama(selected_id, LOCAL_DATA_DIR), reset_ui_state=True)
+                except DataValidationError as exc:
+                    st.sidebar.error(str(exc))
                 else:
-                    set_project(loaded, reset_ui_state=True)
-                    st.session_state.loaded_paths = (
-                        f"uploaded: {selected_actors_file.name}",
-                        f"uploaded: {selected_scenes_file.name}",
-                    )
-                    st.session_state.sidebar_success = "Loaded uploaded project JSON."
+                    st.session_state.sidebar_success = "Switched drama."
                     rerun()
 
-    if storage_backend == "Google Sheets":
-        credentials_present = google_service_account_credentials() is not None
-        spreadsheet_id = st.sidebar.text_input(
-            "Spreadsheet ID",
-            value=st.session_state.get("google_spreadsheet_id", default_google_spreadsheet_id()),
-            key="google_spreadsheet_id",
-            help=(
-                "Copy the ID from a Google Sheet URL like "
-                "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit. "
-                "Share the sheet with the service account client_email as an editor."
-            ),
-        )
-        st.sidebar.caption("Uses worksheets named `actors` and `scenes`.")
-        st.sidebar.caption(f"Credentials: `{google_credentials_source()}`")
-        render_google_sheets_tutorial()
+    save_disabled = not has_current_drama() or not can_save or not dirty
+    if st.sidebar.button("Save drama", disabled=save_disabled, width="stretch"):
+        try:
+            save_current_drama()
+        except DataValidationError as exc:
+            st.sidebar.error(str(exc))
+        else:
+            st.sidebar.success("Drama saved.")
 
-        with st.sidebar.expander("Google credentials"):
-            uploaded_credentials = st.file_uploader(
-                "Service account JSON",
-                type="json",
-                key="google_credentials_file",
-                help=(
-                    "Upload the JSON key downloaded from Google Cloud Console for a service "
-                    "account. The JSON must include type, client_email, private_key, and token_uri."
-                ),
+    with st.sidebar.expander("Create drama", expanded=not has_current_drama()):
+        with st.form("create_drama"):
+            new_drama_name = st.text_input("Drama name")
+            submitted = st.form_submit_button("Create drama", width="stretch")
+            if submitted:
+                if dirty:
+                    st.error("Save or discard the current drama before creating another.")
+                else:
+                    try:
+                        drama = create_drama(new_drama_name, LOCAL_DATA_DIR)
+                    except DataValidationError as exc:
+                        st.error(str(exc))
+                    else:
+                        set_current_drama(drama, reset_ui_state=True)
+                        st.session_state.sidebar_success = "Drama created."
+                        rerun()
+
+    if not has_current_drama():
+        return
+
+    with st.sidebar.expander("Rename drama"):
+        with st.form("rename_drama"):
+            renamed_drama = st.text_input(
+                "Drama name",
+                value=str(st.session_state.current_drama_name),
             )
-            pasted_credentials = st.text_area(
-                "Paste service account JSON",
-                height=120,
-                key="google_credentials_text",
-                help=(
-                    "Paste the complete service account JSON object. Do not paste only the "
-                    "private key. The app validates that type, client_email, and private_key exist."
-                ),
+            submitted = st.form_submit_button(
+                "Rename drama",
+                disabled=dirty,
+                width="stretch",
             )
-            save_for_refresh = st.checkbox(
-                "Save locally for browser refresh",
-                value=True,
-                help=(
-                    "Stores credentials in .streamlit/google_service_account.json and the "
-                    "spreadsheet ID in .streamlit/google_sheets.json. The .streamlit directory "
-                    "is ignored by Git except config.toml."
-                ),
-            )
-            if st.button("Apply Google credentials", width="stretch"):
+            if submitted:
                 try:
-                    credentials = _parse_credentials_input(uploaded_credentials, pasted_credentials)
-                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                    drama = rename_drama(str(current_id), renamed_drama, LOCAL_DATA_DIR)
+                except DataValidationError as exc:
                     st.error(str(exc))
                 else:
-                    st.session_state.google_service_account_credentials = credentials
-                    if save_for_refresh:
-                        _save_json_file(LOCAL_GOOGLE_CREDENTIALS_PATH, credentials)
-                        if spreadsheet_id.strip():
-                            remember_google_spreadsheet_id(spreadsheet_id)
-                    st.success("Google credentials applied.")
+                    set_current_drama(drama, reset_ui_state=False)
+                    st.session_state.sidebar_success = "Drama renamed."
                     rerun()
+        if dirty:
+            st.caption("Save or discard changes before renaming.")
 
-        if not credentials_present:
-            st.sidebar.error("Add Google service account credentials first.")
-
-        google_ready = credentials_present and bool(spreadsheet_id.strip())
-        if st.sidebar.button("Load from Google Sheets", disabled=not google_ready, width="stretch"):
-            try:
-                set_project(google_storage(spreadsheet_id).load_project(), reset_ui_state=True)
-            except (StorageError, DataValidationError, ValueError) as exc:
-                st.sidebar.error(str(exc))
-            else:
-                st.session_state.loaded_paths = ("Google Sheets: actors", "Google Sheets: scenes")
-                remember_google_spreadsheet_id(spreadsheet_id)
-                st.session_state.sidebar_success = "Loaded project from Google Sheets."
-                rerun()
-
-        if st.sidebar.button(
-            "Save to Google Sheets",
-            disabled=not google_ready or not can_save,
+    with st.sidebar.expander("Delete drama"):
+        confirm_delete = st.checkbox(
+            "Delete this drama permanently",
+            key="confirm_delete_drama",
+            disabled=dirty,
+        )
+        if dirty:
+            st.caption("Save or discard changes before deleting.")
+        if st.button(
+            "Delete drama",
+            disabled=dirty or not confirm_delete,
             width="stretch",
         ):
-            try:
-                google_storage(spreadsheet_id).save_project(project)
-            except (StorageError, DataValidationError, ValueError) as exc:
-                st.sidebar.error(str(exc))
+            delete_drama(str(current_id), LOCAL_DATA_DIR)
+            next_drama = choose_initial_drama(LOCAL_DATA_DIR)
+            if next_drama is None:
+                clear_current_drama()
+                st.session_state.sidebar_success = "Drama deleted."
             else:
-                st.session_state.loaded_paths = ("Google Sheets: actors", "Google Sheets: scenes")
-                remember_google_spreadsheet_id(spreadsheet_id)
-                st.sidebar.success("Saved project to Google Sheets.")
-
-    st.sidebar.download_button(
-        "Download actors.json",
-        data=dump_actors_json(project.actors),
-        file_name="actors.json",
-        mime="application/json",
-        width="stretch",
-    )
-    st.sidebar.download_button(
-        "Download scenes.json",
-        data=dump_scenes_json(project.scenes),
-        file_name="scenes.json",
-        mime="application/json",
-        width="stretch",
-    )
+                set_current_drama(next_drama, reset_ui_state=True)
+                st.session_state.sidebar_success = "Drama deleted."
+            rerun()
 
 
 def rename_actor(project: ProjectData, old_name: str, new_name: str) -> None:
@@ -501,6 +411,7 @@ def render_actors_tab() -> None:
                 st.error("Actor names must be unique.")
             else:
                 project.actors[cleaned] = blank_matrix()
+                set_project_dirty()
                 st.success(f"Added {cleaned}.")
                 rerun()
 
@@ -527,6 +438,7 @@ def render_actors_tab() -> None:
                 st.error("Actor names must be unique.")
             elif cleaned != selected:
                 rename_actor(project, selected, cleaned)
+                set_project_dirty()
                 st.success("Actor renamed and scene references updated.")
                 rerun()
 
@@ -538,6 +450,7 @@ def render_actors_tab() -> None:
             st.button("Delete actor", disabled=True, width="stretch")
         elif st.button("Delete actor", width="stretch"):
             del project.actors[selected]
+            set_project_dirty()
             st.success("Actor deleted.")
             rerun()
 
@@ -562,6 +475,7 @@ def render_actors_tab() -> None:
             [bool(edited.loc[row_index, column]) for column in columns]
             for row_index in range(len(DAYS))
         ]
+        set_project_dirty()
         st.success("Availability updated.")
         rerun()
 
@@ -614,6 +528,7 @@ def render_scenes_tab() -> None:
                 project.scenes.append(
                     Scene(name=cleaned, actors=tuple(actors), duration_slots=int(duration))
                 )
+                set_project_dirty()
                 st.success("Scene added.")
                 rerun()
 
@@ -665,11 +580,13 @@ def render_scenes_tab() -> None:
                     actors=tuple(edited_actors),
                     duration_slots=int(edited_duration),
                 )
+                set_project_dirty()
                 st.success("Scene updated.")
                 rerun()
 
     if st.button("Delete selected scene", width="stretch"):
         del project.scenes[selected_index]
+        set_project_dirty()
         st.success("Scene deleted.")
         rerun()
 
@@ -725,42 +642,84 @@ def render_results_tab() -> None:
     )
 
 
-def render_json_tab() -> None:
+def render_advanced_tab() -> None:
     project = get_project()
-    st.subheader("JSON")
+    st.subheader("Advanced")
 
-    upload_col1, upload_col2 = st.columns(2)
-    actors_file = upload_col1.file_uploader("Actors JSON", type="json")
-    scenes_file = upload_col2.file_uploader("Scenes JSON", type="json")
+    st.markdown("#### Backup")
+    backup_col1, backup_col2, backup_col3 = st.columns(3)
+    backup_col1.download_button(
+        "Download drama JSON",
+        data=dump_drama_json(current_drama()),
+        file_name=f"{st.session_state.current_drama_id}.json",
+        mime="application/json",
+        width="stretch",
+    )
+    backup_col2.download_button(
+        "Download actors.json",
+        data=dump_actors_json(project.actors),
+        file_name="actors.json",
+        mime="application/json",
+        width="stretch",
+    )
+    backup_col3.download_button(
+        "Download scenes.json",
+        data=dump_scenes_json(project.scenes),
+        file_name="scenes.json",
+        mime="application/json",
+        width="stretch",
+    )
 
-    if st.button("Import uploaded JSON", width="stretch"):
-        if actors_file is None or scenes_file is None:
-            st.error("Upload both actors and scenes JSON files.")
-        else:
-            try:
-                set_project(
-                    parse_uploaded_project_files(actors_file, scenes_file),
-                    reset_ui_state=True,
-                )
-            except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
-                st.error(f"Import failed: {exc}")
+    with st.expander("Import backup"):
+        drama_file = st.file_uploader("Drama JSON backup", type="json")
+        if st.button("Import drama backup", width="stretch"):
+            if drama_file is None:
+                st.error("Upload a drama JSON backup.")
             else:
-                st.session_state.main_success = "Imported project JSON."
-                rerun()
+                try:
+                    drama = parse_uploaded_drama_file(drama_file)
+                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
+                    st.error(f"Import failed: {exc}")
+                else:
+                    set_project(drama.project, reset_ui_state=True)
+                    set_project_dirty()
+                    st.session_state.main_success = "Imported drama backup."
+                    rerun()
 
-    view_col1, view_col2 = st.columns(2)
-    with view_col1:
-        st.markdown("#### actors.json")
-        st.code(
-            json.dumps(actors_to_jsonable(project.actors), ensure_ascii=False, indent=2),
-            language="json",
-        )
-    with view_col2:
-        st.markdown("#### scenes.json")
-        st.code(
-            json.dumps(scenes_to_jsonable(project.scenes), ensure_ascii=False, indent=2),
-            language="json",
-        )
+        upload_col1, upload_col2 = st.columns(2)
+        actors_file = upload_col1.file_uploader("Legacy actors.json", type="json")
+        scenes_file = upload_col2.file_uploader("Legacy scenes.json", type="json")
+
+        if st.button("Import legacy actors/scenes JSON", width="stretch"):
+            if actors_file is None or scenes_file is None:
+                st.error("Upload both actors and scenes JSON files.")
+            else:
+                try:
+                    set_project(
+                        parse_uploaded_project_files(actors_file, scenes_file),
+                        reset_ui_state=True,
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
+                    st.error(f"Import failed: {exc}")
+                else:
+                    set_project_dirty()
+                    st.session_state.main_success = "Imported legacy project JSON."
+                    rerun()
+
+    with st.expander("View current JSON"):
+        view_col1, view_col2 = st.columns(2)
+        with view_col1:
+            st.markdown("#### actors.json")
+            st.code(
+                json.dumps(actors_to_jsonable(project.actors), ensure_ascii=False, indent=2),
+                language="json",
+            )
+        with view_col2:
+            st.markdown("#### scenes.json")
+            st.code(
+                json.dumps(scenes_to_jsonable(project.scenes), ensure_ascii=False, indent=2),
+                language="json",
+            )
 
 
 def main() -> None:
@@ -775,8 +734,14 @@ def main() -> None:
     if main_success:
         st.success(str(main_success))
 
-    actors_tab, scenes_tab, results_tab, json_tab = st.tabs(
-        ["Actors", "Scenes", "Results", "JSON"]
+    if not has_current_drama():
+        st.info("Create a drama in the sidebar to start managing actors and scenes.")
+        return
+
+    st.caption(f"Drama: {st.session_state.current_drama_name}")
+
+    actors_tab, scenes_tab, results_tab, advanced_tab = st.tabs(
+        ["Actors", "Scenes", "Results", "Advanced"]
     )
     with actors_tab:
         render_actors_tab()
@@ -784,8 +749,8 @@ def main() -> None:
         render_scenes_tab()
     with results_tab:
         render_results_tab()
-    with json_tab:
-        render_json_tab()
+    with advanced_tab:
+        render_advanced_tab()
 
 
 if __name__ == "__main__":

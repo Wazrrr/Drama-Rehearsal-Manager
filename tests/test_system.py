@@ -17,6 +17,23 @@ def blank_matrix() -> list[list[int]]:
     return [[0 for _ in range(SLOTS_PER_DAY)] for _ in range(DAYS_PER_WEEK)]
 
 
+def write_drama_file(path: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "cli-drama",
+                "name": "CLI Drama",
+                "created_at": "2026-06-14T00:00:00Z",
+                "updated_at": "2026-06-14T00:00:00Z",
+                "actors": {"Alice": blank_matrix()},
+                "scenes": [{"name": "Scene", "actors": ["Alice"], "duration_slots": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class RehearsalManagementTests(unittest.TestCase):
     def test_single_slot_intersection(self) -> None:
         alice = blank_matrix()
@@ -125,6 +142,79 @@ class RehearsalManagementTests(unittest.TestCase):
         payload = json.loads(proc_json.stdout)
         self.assertIn("Scene_1", payload)
         self.assertIsInstance(payload["Scene_1"], list)
+
+    def test_cli_drama_input(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            drama_path = Path(tmp) / "cli-drama.json"
+            write_drama_file(drama_path)
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "main.py",
+                    "--drama",
+                    str(drama_path),
+                    "--format",
+                    "json",
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertIn("Scene", payload)
+
+    def test_cli_rejects_mixed_drama_and_legacy_inputs(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+        scenes_path = root / "data" / "scenes.sample.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            drama_path = Path(tmp) / "cli-drama.json"
+            write_drama_file(drama_path)
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "main.py",
+                    "--drama",
+                    str(drama_path),
+                    "--actors",
+                    str(actors_path),
+                    "--scenes",
+                    str(scenes_path),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("provide either --drama", proc.stderr)
+
+    def test_cli_rejects_incomplete_legacy_input(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        actors_path = root / "data" / "actors.sample.json"
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--actors",
+                str(actors_path),
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("provide --drama, or both --actors and --scenes", proc.stderr)
 
     def test_cli_no_weekend_filter(self) -> None:
         root = Path(__file__).resolve().parent.parent

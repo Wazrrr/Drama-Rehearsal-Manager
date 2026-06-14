@@ -23,7 +23,7 @@ def _read_json(path: Path) -> object:
         raise DataValidationError(f"invalid JSON in {path}: {exc}") from exc
 
 
-def parse_actor_availability(raw: object) -> dict[str, Matrix]:
+def parse_actor_availability(raw: object, *, allow_empty: bool = False) -> dict[str, Matrix]:
     if not isinstance(raw, dict):
         raise DataValidationError("actors file must be an object: {actor_name: matrix}")
 
@@ -37,7 +37,7 @@ def parse_actor_availability(raw: object) -> dict[str, Matrix]:
             raise DataValidationError(str(exc)) from exc
         actors[actor_name] = normalized
 
-    if not actors:
+    if not actors and not allow_empty:
         raise DataValidationError("actors file is empty")
 
     return actors
@@ -79,13 +79,18 @@ def _validate_scene_item(item: object, known_actors: set[str], index: int) -> Sc
     return Scene(name=name, actors=tuple(normalized_actor_names), duration_slots=duration_slots)
 
 
-def parse_scenes(raw: object, known_actors: set[str]) -> list[Scene]:
+def parse_scenes(
+    raw: object,
+    known_actors: set[str],
+    *,
+    allow_empty: bool = False,
+) -> list[Scene]:
     if not isinstance(raw, list):
         raise DataValidationError("scenes file must be an array")
 
     scenes = [_validate_scene_item(item, known_actors, idx) for idx, item in enumerate(raw)]
 
-    if not scenes:
+    if not scenes and not allow_empty:
         raise DataValidationError("scenes file is empty")
 
     names = [scene.name for scene in scenes]
