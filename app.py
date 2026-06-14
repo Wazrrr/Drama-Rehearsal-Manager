@@ -747,7 +747,7 @@ def edit_actor_dialog() -> None:
                 key=project_widget_key("actor_selector"),
             )
         with name_col:
-            st.markdown("##### Rename")
+            st.markdown("##### Actor name")
             updated_name = st.text_input(
                 "Actor name",
                 value=selected,
@@ -1067,13 +1067,18 @@ def edit_scene_dialog() -> None:
         st.warning("Add a scene before editing.")
         return
 
-    scene_names = [scene.name for scene in project.scenes]
-    st.markdown("##### Select scene")
-    selected_name = st.selectbox("Scene", scene_names, label_visibility="collapsed", key=project_widget_key("scene_selector"))
-    selected_index = scene_names.index(selected_name)
-    selected_scene = project.scenes[selected_index]
-
     with st.container(border=True):
+        scene_names = [scene.name for scene in project.scenes]
+        st.markdown("##### Select scene")
+        selected_name = st.selectbox(
+            "Scene",
+            scene_names,
+            label_visibility="collapsed",
+            key=project_widget_key("scene_selector"),
+        )
+        selected_index = scene_names.index(selected_name)
+        selected_scene = project.scenes[selected_index]
+
         with st.form("edit_scene", border=False):
             st.markdown("##### Scene")
             edited_name = st.text_input(
