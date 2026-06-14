@@ -204,6 +204,23 @@ def render_shell() -> None:
         unsafe_allow_html=True,
     )
     st.title("Rehearsal Manager")
+    st.markdown(
+        """
+        <style>
+          .st-key-delete_dialog_action button:not(:disabled) {
+            background-color: #da3633 !important;
+            border-color: #da3633 !important;
+            color: white !important;
+          }
+          .st-key-delete_dialog_action button:not(:disabled):hover {
+            background-color: #b62324 !important;
+            border-color: #b62324 !important;
+            color: white !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def preserve_copy_shortcut() -> None:
@@ -291,6 +308,7 @@ def create_drama_dialog() -> None:
             "Create drama",
             icon=":material/add:",
             key="create_dialog_submit",
+            type="primary",
             width="stretch",
         )
         if submitted:
@@ -411,22 +429,23 @@ def delete_drama_dialog() -> None:
         key="delete_dialog_confirm_name",
     )
     delete_disabled = confirm_name != str(st.session_state.current_drama_name)
-    if st.button(
-        "Delete drama",
-        icon=":material/delete:",
-        key="delete_dialog_submit",
-        disabled=delete_disabled,
-        width="stretch",
-    ):
-        delete_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR)
-        next_drama = choose_initial_drama(LOCAL_DATA_DIR)
-        if next_drama is None:
-            clear_current_drama()
-        else:
-            set_current_drama(next_drama, reset_ui_state=True)
-        close_drama_dialog()
-        st.session_state.sidebar_success = "Drama deleted."
-        rerun()
+    with st.container(key="delete_dialog_action"):
+        if st.button(
+            "Delete drama",
+            icon=":material/delete:",
+            key="delete_dialog_submit",
+            disabled=delete_disabled,
+            width="stretch",
+        ):
+            delete_drama(str(st.session_state.current_drama_id), LOCAL_DATA_DIR)
+            next_drama = choose_initial_drama(LOCAL_DATA_DIR)
+            if next_drama is None:
+                clear_current_drama()
+            else:
+                set_current_drama(next_drama, reset_ui_state=True)
+            close_drama_dialog()
+            st.session_state.sidebar_success = "Drama deleted."
+            rerun()
 
 
 def render_sidebar() -> None:
@@ -503,6 +522,7 @@ def render_sidebar() -> None:
         "",
         icon=":material/add:",
         help="Create drama",
+        type="primary",
         width="stretch",
     ):
         open_drama_dialog("create")
@@ -579,8 +599,9 @@ def add_actor_dialog() -> None:
         new_actor = st.text_input("Actor name", key="add_actor_dialog_name")
         submitted = st.form_submit_button(
             "Add actor",
-            icon=":material/person_add:",
+            icon=":material/add:",
             key="add_actor_dialog_submit",
+            type="primary",
             width="stretch",
         )
         if submitted:
@@ -616,8 +637,8 @@ def render_actors_tab() -> None:
     project = get_project()
     actor_names = list(project.actors)
 
-    list_header_col, add_actor_col, _ = st.columns(
-        [0.12, 0.05, 0.83],
+    list_header_col, add_actor_col = st.columns(
+        [0.92, 0.08],
         vertical_alignment="center",
     )
     with list_header_col:
@@ -625,9 +646,10 @@ def render_actors_tab() -> None:
     with add_actor_col:
         if st.button(
             "",
-            icon=":material/person_add:",
+            icon=":material/add:",
             help="Add actor",
             key="open_add_actor_dialog",
+            type="primary",
             width="stretch",
         ):
             open_actor_dialog("add")
@@ -715,30 +737,49 @@ def scene_summary(project: ProjectData) -> pd.DataFrame:
     )
 
 
-def render_scenes_tab() -> None:
+def open_scene_dialog(name: str) -> None:
+    st.session_state.active_scene_dialog = name
+
+
+def close_scene_dialog() -> None:
+    st.session_state.pop("active_scene_dialog", None)
+
+
+def render_active_scene_dialog() -> None:
+    if st.session_state.get("active_scene_dialog") == "add":
+        add_scene_dialog()
+
+
+@st.dialog("Add scene", on_dismiss=close_scene_dialog)
+def add_scene_dialog() -> None:
     project = get_project()
     actor_names = list(project.actors)
+    if not actor_names:
+        st.warning("Add an actor before creating scenes.")
+        return
 
-    st.subheader("Scenes")
-    if project.scenes:
-        st.markdown("#### Scene List")
-        st.dataframe(scene_summary(project), hide_index=True, width="stretch")
-    else:
-        st.info("Add a scene to start matching rehearsal slots.")
-
-    with st.form("add_scene"):
-        st.markdown("#### Add Scene")
-        name = st.text_input("Scene name", key=project_widget_key("add_scene_name"))
-        actors = st.multiselect("Actors", actor_names, key=project_widget_key("add_scene_actors"))
+    with st.form("add_scene_dialog_form"):
+        name = st.text_input("Scene name", key=project_widget_key("add_scene_dialog_name"))
+        actors = st.multiselect(
+            "Actors",
+            actor_names,
+            key=project_widget_key("add_scene_dialog_actors"),
+        )
         duration = st.number_input(
             "Duration slots",
             min_value=1,
             max_value=7,
             value=1,
             step=1,
-            key=project_widget_key("add_scene_duration"),
+            key=project_widget_key("add_scene_dialog_duration"),
         )
-        submitted = st.form_submit_button("Add scene", width="stretch")
+        submitted = st.form_submit_button(
+            "Add scene",
+            icon=":material/add:",
+            key="add_scene_dialog_submit",
+            type="primary",
+            width="stretch",
+        )
         if submitted:
             cleaned = name.strip()
             if not cleaned:
@@ -752,8 +793,37 @@ def render_scenes_tab() -> None:
                     Scene(name=cleaned, actors=tuple(actors), duration_slots=int(duration))
                 )
                 set_project_dirty()
-                st.success("Scene added.")
+                close_scene_dialog()
+                st.session_state.main_success = "Scene added."
                 rerun()
+
+
+def render_scenes_tab() -> None:
+    project = get_project()
+    actor_names = list(project.actors)
+
+    list_header_col, add_scene_col = st.columns(
+        [0.92, 0.08],
+        vertical_alignment="center",
+    )
+    with list_header_col:
+        st.markdown("#### Scene List")
+    with add_scene_col:
+        if st.button(
+            "",
+            icon=":material/add:",
+            help="Add scene",
+            key="open_add_scene_dialog",
+            type="primary",
+            width="stretch",
+        ):
+            open_scene_dialog("add")
+    render_active_scene_dialog()
+
+    if project.scenes:
+        st.dataframe(scene_summary(project), hide_index=True, width="stretch")
+    else:
+        st.info("Add a scene to start matching rehearsal slots.")
 
     if not project.scenes:
         return
