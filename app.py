@@ -90,22 +90,27 @@ def pop_session_value(key: str) -> object | None:
     return value
 
 
-def normalize_active_section(value: object) -> str:
+def normalize_active_section(value: object, *, fallback: object = "Actors") -> str:
     if isinstance(value, (list, tuple)):
         value = value[0] if value else None
     if value in APP_SECTIONS:
         return str(value)
+    if fallback in APP_SECTIONS:
+        return str(fallback)
     return "Actors"
 
 
-def set_active_section(value: object) -> str:
-    active_section = normalize_active_section(value)
+def set_active_section(value: object, *, fallback: object = "Actors") -> str:
+    active_section = normalize_active_section(value, fallback=fallback)
     st.session_state[ACTIVE_SECTION_KEY] = active_section
     return active_section
 
 
 def sync_active_section_from_control() -> None:
-    set_active_section(st.session_state.get(ACTIVE_SECTION_CONTROL_KEY))
+    set_active_section(
+        st.session_state.get(ACTIVE_SECTION_CONTROL_KEY),
+        fallback=st.session_state.get(ACTIVE_SECTION_KEY),
+    )
 
 
 def ensure_active_section_state() -> None:
@@ -1126,7 +1131,10 @@ def main() -> None:
         label_visibility="collapsed",
         width="stretch",
     )
-    active_section = set_active_section(active_section)
+    active_section = set_active_section(
+        active_section,
+        fallback=st.session_state.get(ACTIVE_SECTION_KEY),
+    )
 
     if active_section == "Actors":
         render_actors_tab()
