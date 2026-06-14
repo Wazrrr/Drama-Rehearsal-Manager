@@ -528,7 +528,7 @@ def delete_drama_dialog() -> None:
 def render_sidebar() -> None:
     project = get_project()
 
-    st.sidebar.header("Dramas")
+    st.sidebar.header("Drama")
     sidebar_success = pop_session_value("sidebar_success")
     if sidebar_success:
         st.sidebar.success(str(sidebar_success))
@@ -557,6 +557,7 @@ def render_sidebar() -> None:
             index=index,
             format_func=lambda drama_id: labels.get(drama_id, drama_id),
             key="drama_selector",
+            label_visibility="collapsed",
         )
         if selected_id != current_id:
             if dirty:
@@ -1197,8 +1198,7 @@ def render_scenes_tab() -> None:
 
 def render_results_tab() -> None:
     project = get_project()
-    st.subheader("Results")
-
+    st.markdown("#### Status & Filters")
     if "results_days_filter" not in st.session_state:
         st.session_state.results_days_filter = list(DAYS)
     chosen_days = [
@@ -1268,7 +1268,42 @@ def render_results_tab() -> None:
 
 def render_advanced_tab() -> None:
     project = get_project()
-    st.subheader("Advanced")
+
+    st.markdown("#### Import")
+    drama_file = st.file_uploader("Drama JSON backup", type="json")
+    if st.button("Import drama backup", width="stretch"):
+        if drama_file is None:
+            st.error("Upload a drama JSON backup.")
+        else:
+            try:
+                drama = parse_uploaded_drama_file(drama_file)
+            except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
+                st.error(f"Import failed: {exc}")
+            else:
+                set_project(drama.project, reset_ui_state=True)
+                set_project_dirty()
+                st.session_state.main_success = "Imported drama backup."
+                rerun()
+
+    upload_col1, upload_col2 = st.columns(2)
+    actors_file = upload_col1.file_uploader("Legacy actors.json", type="json")
+    scenes_file = upload_col2.file_uploader("Legacy scenes.json", type="json")
+
+    if st.button("Import legacy actors/scenes JSON", width="stretch"):
+        if actors_file is None or scenes_file is None:
+            st.error("Upload both actors and scenes JSON files.")
+        else:
+            try:
+                set_project(
+                    parse_uploaded_project_files(actors_file, scenes_file),
+                    reset_ui_state=True,
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
+                st.error(f"Import failed: {exc}")
+            else:
+                set_project_dirty()
+                st.session_state.main_success = "Imported legacy project JSON."
+                rerun()
 
     st.markdown("#### Backup")
     backup_col1, backup_col2, backup_col3 = st.columns(3)
@@ -1293,42 +1328,6 @@ def render_advanced_tab() -> None:
         mime="application/json",
         width="stretch",
     )
-
-    with st.expander("Import backup"):
-        drama_file = st.file_uploader("Drama JSON backup", type="json")
-        if st.button("Import drama backup", width="stretch"):
-            if drama_file is None:
-                st.error("Upload a drama JSON backup.")
-            else:
-                try:
-                    drama = parse_uploaded_drama_file(drama_file)
-                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
-                    st.error(f"Import failed: {exc}")
-                else:
-                    set_project(drama.project, reset_ui_state=True)
-                    set_project_dirty()
-                    st.session_state.main_success = "Imported drama backup."
-                    rerun()
-
-        upload_col1, upload_col2 = st.columns(2)
-        actors_file = upload_col1.file_uploader("Legacy actors.json", type="json")
-        scenes_file = upload_col2.file_uploader("Legacy scenes.json", type="json")
-
-        if st.button("Import legacy actors/scenes JSON", width="stretch"):
-            if actors_file is None or scenes_file is None:
-                st.error("Upload both actors and scenes JSON files.")
-            else:
-                try:
-                    set_project(
-                        parse_uploaded_project_files(actors_file, scenes_file),
-                        reset_ui_state=True,
-                    )
-                except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
-                    st.error(f"Import failed: {exc}")
-                else:
-                    set_project_dirty()
-                    st.session_state.main_success = "Imported legacy project JSON."
-                    rerun()
 
     with st.expander("View current JSON"):
         view_col1, view_col2 = st.columns(2)
