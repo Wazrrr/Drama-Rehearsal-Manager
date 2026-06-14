@@ -121,7 +121,7 @@ def compute_project_results(project: ProjectData) -> dict[str, list[FeasibleSlot
     return compute_all_scene_feasibility(validated.scenes, validated.actors)
 
 
-def _merged_slot_labels(slots: list[FeasibleSlot]) -> list[str]:
+def merged_slot_labels(slots: list[FeasibleSlot]) -> list[str]:
     merged: list[tuple[int, int, int]] = []
     for slot in sorted(slots, key=lambda item: (item.day_index, item.start_slot)):
         start = slot.start_slot
@@ -155,7 +155,7 @@ def result_rows(
                 }
             )
             continue
-        for slot_label in _merged_slot_labels(slots):
+        for slot_label in merged_slot_labels(slots):
             rows.append(
                 {
                     "Scene": scene_name,

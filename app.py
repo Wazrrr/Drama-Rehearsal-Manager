@@ -17,6 +17,7 @@ from app_services import (
     empty_project,
     export_results_json,
     export_results_text,
+    merged_slot_labels,
     parse_project_payloads,
     result_rows,
     scenes_to_jsonable,
@@ -809,12 +810,23 @@ def actor_summary(project: ProjectData) -> pd.DataFrame:
         [
             {
                 "Actor": actor_name,
-                "Scenes": ", ".join(
-                    scene.name for scene in project.scenes if actor_name in scene.actors
+                "Time slots": "\n".join(
+                    merged_slot_labels(
+                        [
+                            FeasibleSlot(
+                                day_index=day_index,
+                                start_slot=slot_index,
+                                duration_slots=1,
+                            )
+                            for day_index, day_slots in enumerate(matrix)
+                            for slot_index, available in enumerate(day_slots)
+                            if available
+                        ]
+                    )
                 )
                 or "none",
             }
-            for actor_name in project.actors
+            for actor_name, matrix in project.actors.items()
         ]
     )
 
@@ -900,7 +912,7 @@ def render_actors_tab() -> None:
         vertical_alignment="center",
     )
     with list_header_col:
-        st.markdown("#### Actor-Scene List")
+        st.markdown("#### Actor-Time Slots List")
     with actor_action_col.container(
         horizontal=True,
         horizontal_alignment="right",

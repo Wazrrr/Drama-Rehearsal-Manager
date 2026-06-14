@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app import actor_availability_sheet, scene_availability_sheet
+from app import actor_availability_sheet, actor_summary, scene_availability_sheet
 from app_services import ProjectData
 from models import FeasibleSlot
 from time_grid import DAYS_PER_WEEK, SLOTS_PER_DAY
@@ -13,6 +13,22 @@ def blank_matrix(value: int = 0) -> list[list[int]]:
 
 
 class AvailabilitySheetTests(unittest.TestCase):
+    def test_actor_summary_uses_merged_time_slots(self) -> None:
+        matrix = blank_matrix()
+        matrix[0][0] = 1
+        matrix[0][1] = 1
+        matrix[0][3] = 1
+        project = ProjectData(actors={"Alice": matrix}, scenes=[])
+
+        dataframe = actor_summary(project)
+
+        self.assertEqual(list(dataframe.columns), ["Actor", "Time slots"])
+        self.assertEqual(dataframe.loc[0, "Actor"], "Alice")
+        self.assertEqual(
+            dataframe.loc[0, "Time slots"],
+            "Mon 10:00-14:00\nMon 16:00-18:00",
+        )
+
     def test_actor_availability_uses_weekdays_as_columns(self) -> None:
         matrix = blank_matrix()
         matrix[0][0] = 1
