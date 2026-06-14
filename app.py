@@ -308,7 +308,8 @@ def render_sidebar() -> None:
         except DataValidationError as exc:
             st.sidebar.error(str(exc))
         else:
-            st.sidebar.success("Drama saved.")
+            st.session_state.sidebar_success = "Drama saved."
+            rerun()
 
     with st.sidebar.expander("Create drama", expanded=not has_current_drama()):
         with st.form("create_drama"):
