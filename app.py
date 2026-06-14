@@ -45,6 +45,7 @@ APP_SECTIONS = ("Actors", "Scenes", "Results", "Advanced")
 DAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 ACTIVE_SECTION_KEY = "active_section"
 ACTIVE_SECTION_CONTROL_KEY = "active_section_control"
+ACTIVE_SECTION_QUERY_PARAM = "section"
 ACTION_BUTTON_WIDTH = 112
 AVAILABILITY_ROW_HEIGHT = 84
 AVAILABILITY_DAY_WIDTH = 116
@@ -109,9 +110,19 @@ def normalize_active_section(value: object, *, fallback: object = "Actors") -> s
     return "Actors"
 
 
+def active_section_from_query_params() -> str:
+    return normalize_active_section(st.query_params.get(ACTIVE_SECTION_QUERY_PARAM))
+
+
+def persist_active_section(active_section: str) -> None:
+    if st.query_params.get(ACTIVE_SECTION_QUERY_PARAM) != active_section:
+        st.query_params[ACTIVE_SECTION_QUERY_PARAM] = active_section
+
+
 def set_active_section(value: object, *, fallback: object = "Actors") -> str:
     active_section = normalize_active_section(value, fallback=fallback)
     st.session_state[ACTIVE_SECTION_KEY] = active_section
+    persist_active_section(active_section)
     return active_section
 
 
@@ -123,7 +134,10 @@ def sync_active_section_from_control() -> None:
 
 
 def ensure_active_section_state() -> None:
-    active_section = set_active_section(st.session_state.get(ACTIVE_SECTION_KEY))
+    active_section = set_active_section(
+        st.session_state.get(ACTIVE_SECTION_KEY),
+        fallback=active_section_from_query_params(),
+    )
     if st.session_state.get(ACTIVE_SECTION_CONTROL_KEY) != active_section:
         st.session_state[ACTIVE_SECTION_CONTROL_KEY] = active_section
 

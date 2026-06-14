@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: python-compile
+        name: python compile
+        entry: .venv/bin/python -m py_compile app.py app_services.py day_filters.py drama_storage.py loader.py main.py matcher.py models.py report.py time_grid.py
+        language: system
+        pass_filenames: false
+      - id: unit-tests
+        name: unit tests
+        entry: .venv/bin/python -m unittest discover -s tests
+        language: system
+        pass_filenames: false
