@@ -57,6 +57,22 @@ class AppServicesTests(unittest.TestCase):
         self.assertIn("Actor A", project.actors)
         self.assertEqual(project.scenes[0].name, "Scene One")
 
+    def test_parse_project_payloads_accepts_scene_description(self) -> None:
+        actors = {"Actor A": blank_matrix(1)}
+        scenes = [
+            {
+                "name": "1.4",
+                "description": "jewojow",
+                "actors": ["Actor A"],
+                "duration_slots": 1,
+            }
+        ]
+
+        project = parse_project_payloads(actors, scenes)
+
+        self.assertEqual(project.scenes[0].name, "1.4")
+        self.assertEqual(project.scenes[0].description, "jewojow")
+
     def test_parse_project_payloads_rejects_unknown_scene_actor(self) -> None:
         actors = {"Alice": blank_matrix(1)}
         scenes = [{"name": "Scene", "actors": ["Bob"], "duration_slots": 1}]
@@ -67,13 +83,22 @@ class AppServicesTests(unittest.TestCase):
     def test_dump_json_preserves_schema_and_unicode(self) -> None:
         project = ProjectData(
             actors={"Actor A": [[True for _ in range(SLOTS_PER_DAY)] for _ in range(DAYS_PER_WEEK)]},
-            scenes=[Scene(name="Scene One", actors=("Actor A",), duration_slots=2)],
+            scenes=[
+                Scene(
+                    name="Scene One",
+                    actors=("Actor A",),
+                    duration_slots=2,
+                    description="Opening moment",
+                )
+            ],
         )
 
         actors_payload = json.loads(dump_actors_json(project.actors))
         scenes_payload = json.loads(dump_scenes_json(project.scenes))
 
         self.assertEqual(actors_payload["Actor A"][0][0], 1)
+        self.assertEqual(scenes_payload[0]["name"], "Scene One")
+        self.assertEqual(scenes_payload[0]["description"], "Opening moment")
         self.assertEqual(scenes_payload[0]["actors"], ["Actor A"])
         self.assertEqual(scenes_payload[0]["duration_slots"], 2)
 

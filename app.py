@@ -56,10 +56,16 @@ PROJECT_UI_KEY_PREFIXES = (
     "rename_actor_",
     "availability_editor_",
     "add_scene_name_",
+    "add_scene_description_",
+    "add_scene_dialog_name_",
+    "add_scene_dialog_description_",
+    "add_scene_dialog_actors_",
+    "add_scene_dialog_duration_",
     "add_scene_actors_",
     "add_scene_duration_",
     "scene_selector_",
     "edit_scene_name_",
+    "edit_scene_description_",
     "edit_scene_actors_",
     "edit_scene_duration_",
 )
@@ -637,6 +643,7 @@ def rename_actor(project: ProjectData, old_name: str, new_name: str) -> None:
             name=scene.name,
             actors=tuple(new_name if actor == old_name else actor for actor in scene.actors),
             duration_slots=scene.duration_slots,
+            description=scene.description,
         )
         for scene in project.scenes
     ]
@@ -908,11 +915,24 @@ def render_actors_tab() -> None:
         return
 
 
+def scene_name_exists(
+    project: ProjectData,
+    scene_name: str,
+    *,
+    exclude_position: int | None = None,
+) -> bool:
+    return any(
+        scene.name == scene_name and position != exclude_position
+        for position, scene in enumerate(project.scenes)
+    )
+
+
 def scene_summary(project: ProjectData) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
                 "Scene": scene.name,
+                "Description": scene.description,
                 "Actors": ", ".join(scene.actors),
                 "Duration": f"{scene.duration_slots} slot(s) / {scene.duration_slots * 2} hour(s)",
             }
@@ -946,7 +966,15 @@ def add_scene_dialog() -> None:
         return
 
     with st.form("add_scene_dialog_form"):
-        name = st.text_input("Scene name", key=project_widget_key("add_scene_dialog_name"))
+        name = st.text_input(
+            "Scene",
+            key=project_widget_key("add_scene_dialog_name"),
+        )
+        description = st.text_input(
+            "Description",
+            placeholder="optional",
+            key=project_widget_key("add_scene_dialog_description"),
+        )
         actors = st.multiselect(
             "Actors",
             actor_names,
@@ -968,16 +996,22 @@ def add_scene_dialog() -> None:
             width="stretch",
         )
         if submitted:
-            cleaned = name.strip()
-            if not cleaned:
-                st.error("Scene name is required.")
-            elif any(scene.name == cleaned for scene in project.scenes):
-                st.error("Scene names must be unique.")
+            cleaned_name = name.strip()
+            cleaned_description = description.strip()
+            if not cleaned_name:
+                st.error("Scene is required.")
+            elif scene_name_exists(project, cleaned_name):
+                st.error("Scenes must be unique.")
             elif not actors:
                 st.error("Choose at least one actor.")
             else:
                 project.scenes.append(
-                    Scene(name=cleaned, actors=tuple(actors), duration_slots=int(duration))
+                    Scene(
+                        name=cleaned_name,
+                        actors=tuple(actors),
+                        duration_slots=int(duration),
+                        description=cleaned_description,
+                    )
                 )
                 set_project_dirty()
                 close_scene_dialog()
@@ -1001,9 +1035,14 @@ def edit_scene_dialog() -> None:
     with st.container(border=True):
         with st.form("edit_scene", border=False):
             edited_name = st.text_input(
-                "Rename Scene",
+                "Scene",
                 value=selected_scene.name,
                 key=project_widget_key(f"edit_scene_name_{selected_name}"),
+            )
+            edited_description = st.text_input(
+                "Description",
+                value=selected_scene.description,
+                key=project_widget_key(f"edit_scene_description_{selected_name}"),
             )
             edited_actors = st.multiselect(
                 "Actors",
@@ -1021,22 +1060,25 @@ def edit_scene_dialog() -> None:
             )
             saved = st.form_submit_button("Save scene", width="stretch")
             if saved:
-                cleaned = edited_name.strip()
-                duplicate = any(
-                    scene.name == cleaned and idx != selected_index
-                    for idx, scene in enumerate(project.scenes)
+                cleaned_name = edited_name.strip()
+                cleaned_description = edited_description.strip()
+                duplicate = scene_name_exists(
+                    project,
+                    cleaned_name,
+                    exclude_position=selected_index,
                 )
-                if not cleaned:
-                    st.error("Scene name is required.")
+                if not cleaned_name:
+                    st.error("Scene is required.")
                 elif duplicate:
-                    st.error("Scene names must be unique.")
+                    st.error("Scenes must be unique.")
                 elif not edited_actors:
                     st.error("Choose at least one actor.")
                 else:
                     project.scenes[selected_index] = Scene(
-                        name=cleaned,
+                        name=cleaned_name,
                         actors=tuple(edited_actors),
                         duration_slots=int(edited_duration),
+                        description=cleaned_description,
                     )
                     set_project_dirty()
                     reset_project_ui_state()

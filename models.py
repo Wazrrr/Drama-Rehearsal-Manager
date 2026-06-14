@@ -10,6 +10,7 @@ class Scene:
     name: str
     actors: tuple[str, ...]
     duration_slots: int = 1
+    description: str = ""
 
 
 @dataclass(frozen=True)

@@ -56,27 +56,42 @@ def _validate_scene_item(item: object, known_actors: set[str], index: int) -> Sc
     name = item.get("name")
     if not isinstance(name, str) or not name.strip():
         raise DataValidationError(f"scene at index {index} has invalid 'name'")
+    cleaned_name = name.strip()
+
+    description = item.get("description", "")
+    if description is None:
+        description = ""
+    if not isinstance(description, str):
+        raise DataValidationError(f"scene '{cleaned_name}' has invalid description")
+    cleaned_description = description.strip()
 
     actors = item.get("actors")
     if not isinstance(actors, list) or not actors:
-        raise DataValidationError(f"scene '{name}' must contain a non-empty 'actors' list")
+        raise DataValidationError(f"scene '{cleaned_name}' must contain a non-empty 'actors' list")
     normalized_actor_names: list[str] = []
     for actor in actors:
         if not isinstance(actor, str) or not actor.strip():
-            raise DataValidationError(f"scene '{name}' has invalid actor name: {actor!r}")
+            raise DataValidationError(f"scene '{cleaned_name}' has invalid actor name: {actor!r}")
         if actor not in known_actors:
-            raise DataValidationError(f"scene '{name}' references unknown actor '{actor}'")
+            raise DataValidationError(f"scene '{cleaned_name}' references unknown actor '{actor}'")
         normalized_actor_names.append(actor)
 
     duration_slots = item.get("duration_slots", 1)
     if not isinstance(duration_slots, int) or duration_slots <= 0:
-        raise DataValidationError(f"scene '{name}' has invalid duration_slots '{duration_slots}'")
+        raise DataValidationError(
+            f"scene '{cleaned_name}' has invalid duration_slots '{duration_slots}'"
+        )
     if duration_slots > SLOTS_PER_DAY:
         raise DataValidationError(
-            f"scene '{name}' duration_slots exceeds slots per day ({SLOTS_PER_DAY})"
+            f"scene '{cleaned_name}' duration_slots exceeds slots per day ({SLOTS_PER_DAY})"
         )
 
-    return Scene(name=name, actors=tuple(normalized_actor_names), duration_slots=duration_slots)
+    return Scene(
+        name=cleaned_name,
+        actors=tuple(normalized_actor_names),
+        duration_slots=duration_slots,
+        description=cleaned_description,
+    )
 
 
 def parse_scenes(

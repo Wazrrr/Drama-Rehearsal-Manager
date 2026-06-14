@@ -74,14 +74,17 @@ def actors_to_jsonable(actors: dict[str, Matrix]) -> dict[str, list[list[int]]]:
 
 
 def scenes_to_jsonable(scenes: list[Scene]) -> list[dict[str, object]]:
-    return [
-        {
+    payload: list[dict[str, object]] = []
+    for scene in scenes:
+        item: dict[str, object] = {
             "name": scene.name,
             "actors": list(scene.actors),
             "duration_slots": scene.duration_slots,
         }
-        for scene in scenes
-    ]
+        if scene.description:
+            item["description"] = scene.description
+        payload.append(item)
+    return payload
 
 
 def dump_actors_json(actors: dict[str, Matrix]) -> str:
