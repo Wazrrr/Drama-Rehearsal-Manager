@@ -1,4 +1,9 @@
 __pycache__/
 *.pyc
 .venv/
-.streamlit/
+.streamlit/*
+!.streamlit/
+!.streamlit/config.toml
+private_data/
+
+bash.sh

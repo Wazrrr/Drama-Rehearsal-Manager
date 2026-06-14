@@ -12,10 +12,10 @@ from models import FeasibleSlot, Scene
 from report import format_human_readable, format_json
 from time_grid import Matrix, interval_label
 
-DEFAULT_ACTORS_PATH = Path("data/actors.json")
-DEFAULT_SCENES_PATH = Path("data/scenes.json")
 SAMPLE_ACTORS_PATH = Path("data/actors.sample.json")
 SAMPLE_SCENES_PATH = Path("data/scenes.sample.json")
+DEFAULT_ACTORS_PATH = SAMPLE_ACTORS_PATH
+DEFAULT_SCENES_PATH = SAMPLE_SCENES_PATH
 
 
 @dataclass
@@ -32,9 +32,7 @@ class LoadedProject:
 
 
 def choose_default_project_paths() -> tuple[Path, Path]:
-    if DEFAULT_ACTORS_PATH.exists() and DEFAULT_SCENES_PATH.exists():
-        return DEFAULT_ACTORS_PATH, DEFAULT_SCENES_PATH
-    return SAMPLE_ACTORS_PATH, SAMPLE_SCENES_PATH
+    return DEFAULT_ACTORS_PATH, DEFAULT_SCENES_PATH
 
 
 def load_project(actors_path: str | Path, scenes_path: str | Path) -> ProjectData:

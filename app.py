@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from app_services import (
-    DEFAULT_ACTORS_PATH,
-    DEFAULT_SCENES_PATH,
     ProjectData,
     actors_to_jsonable,
     compute_project_results,
@@ -18,6 +18,7 @@ from app_services import (
     export_results_json,
     export_results_text,
     load_default_project,
+    load_project,
     parse_project_payloads,
     result_rows,
     save_project,
@@ -27,19 +28,77 @@ from app_services import (
 from day_filters import filter_results_by_day_indexes
 from loader import DataValidationError
 from models import Scene
+from storage_backends import GoogleSheetsConfig, GoogleSheetsStorage, StorageError
 from time_grid import DAYS, SLOT_START_HOURS, slot_label
+
+LOCAL_ACTORS_PATH = Path("private_data/actors.json")
+LOCAL_SCENES_PATH = Path("private_data/scenes.json")
+LOCAL_GOOGLE_CREDENTIALS_PATH = Path(".streamlit/google_service_account.json")
+LOCAL_GOOGLE_CONFIG_PATH = Path(".streamlit/google_sheets.json")
+PROJECT_UI_EXACT_KEYS = {"actor_selector", "scene_selector", "add_scene_actors"}
+PROJECT_UI_KEY_PREFIXES = (
+    "new_actor_name_",
+    "actor_selector_",
+    "rename_actor_",
+    "availability_editor_",
+    "add_scene_name_",
+    "add_scene_actors_",
+    "add_scene_duration_",
+    "scene_selector_",
+    "edit_scene_name_",
+    "edit_scene_actors_",
+    "edit_scene_duration_",
+)
 
 
 def blank_matrix() -> list[list[bool]]:
     return [[False for _ in SLOT_START_HOURS] for _ in DAYS]
 
 
-def set_project(project: ProjectData) -> None:
+def project_ui_revision() -> int:
+    return int(st.session_state.get("project_ui_revision", 0))
+
+
+def project_widget_key(name: str) -> str:
+    return f"{name}_{project_ui_revision()}"
+
+
+def reset_project_ui_state() -> None:
+    st.session_state.project_ui_revision = project_ui_revision() + 1
+    for key in list(st.session_state.keys()):
+        key_name = str(key)
+        if key_name in PROJECT_UI_EXACT_KEYS or key_name.startswith(PROJECT_UI_KEY_PREFIXES):
+            del st.session_state[key]
+
+
+def pop_session_value(key: str) -> object | None:
+    if key not in st.session_state:
+        return None
+    value = st.session_state[key]
+    del st.session_state[key]
+    return value
+
+
+def set_project(project: ProjectData, *, reset_ui_state: bool = False) -> None:
     st.session_state.project = project
+    st.session_state.load_error = None
+    if reset_ui_state:
+        reset_project_ui_state()
 
 
 def get_project() -> ProjectData:
     return st.session_state.project
+
+
+def load_local_project() -> ProjectData:
+    missing_paths = [
+        str(path)
+        for path in (LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
+        if not path.exists()
+    ]
+    if missing_paths:
+        raise DataValidationError(f"Missing local JSON file(s): {', '.join(missing_paths)}")
+    return load_project(LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
 
 
 def initialize_state() -> None:
@@ -65,6 +124,7 @@ def rerun() -> None:
 
 def render_shell() -> None:
     st.set_page_config(page_title="Rehearsal Manager", layout="wide")
+    preserve_copy_shortcut()
     st.markdown(
         """
         <style>
@@ -78,20 +138,191 @@ def render_shell() -> None:
     st.title("Rehearsal Manager")
 
 
+def preserve_copy_shortcut() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+          const parentDocument = window.parent.document;
+          if (parentDocument.__rehearsalCopyShortcutGuard) {
+            return;
+          }
+          parentDocument.__rehearsalCopyShortcutGuard = true;
+          parentDocument.addEventListener("keydown", (event) => {
+            const key = (event.key || "").toLowerCase();
+            if ((event.metaKey || event.ctrlKey) && key === "c") {
+              event.stopImmediatePropagation();
+            }
+          }, true);
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _load_json_file(path: Path) -> dict[str, object] | None:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _save_json_file(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _validate_google_credentials(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("service account credentials must be a JSON object")
+    missing = [
+        field
+        for field in ("type", "client_email", "private_key")
+        if not str(payload.get(field, "")).strip()
+    ]
+    if missing:
+        raise ValueError(f"service account JSON is missing: {', '.join(missing)}")
+    if payload.get("type") != "service_account":
+        raise ValueError("service account JSON must have type = service_account")
+    return dict(payload)
+
+
+def _parse_credentials_input(uploaded_file, pasted_json: str) -> dict[str, object]:
+    if uploaded_file is not None:
+        raw = uploaded_file.getvalue().decode("utf-8")
+    else:
+        raw = pasted_json.strip()
+    if not raw:
+        raise ValueError("upload or paste a Google service account JSON file")
+    return _validate_google_credentials(json.loads(raw))
+
+
+def local_google_credentials() -> dict[str, object] | None:
+    payload = _load_json_file(LOCAL_GOOGLE_CREDENTIALS_PATH)
+    if payload is None:
+        return None
+    try:
+        return _validate_google_credentials(payload)
+    except ValueError:
+        return None
+
+
+def local_google_spreadsheet_id() -> str:
+    payload = _load_json_file(LOCAL_GOOGLE_CONFIG_PATH) or {}
+    return str(payload.get("spreadsheet_id", "")).strip()
+
+
+def remember_google_spreadsheet_id(spreadsheet_id: str) -> None:
+    cleaned = spreadsheet_id.strip()
+    if cleaned:
+        _save_json_file(LOCAL_GOOGLE_CONFIG_PATH, {"spreadsheet_id": cleaned})
+
+
+def google_credentials_source() -> str:
+    if st.session_state.get("google_service_account_credentials"):
+        return "website input"
+    try:
+        if "google_service_account" in st.secrets:
+            return "Streamlit secrets"
+    except FileNotFoundError:
+        pass
+    if local_google_credentials() is not None:
+        return "local .streamlit file"
+    return "none"
+
+
+def google_service_account_credentials() -> dict[str, object] | None:
+    session_credentials = st.session_state.get("google_service_account_credentials")
+    if session_credentials:
+        return dict(session_credentials)
+    try:
+        credentials = st.secrets["google_service_account"]
+    except (FileNotFoundError, KeyError):
+        return local_google_credentials()
+    return dict(credentials)
+
+
+def default_google_spreadsheet_id() -> str:
+    try:
+        config = st.secrets.get("google_sheets", {})
+    except FileNotFoundError:
+        return local_google_spreadsheet_id()
+    return str(config.get("spreadsheet_id", "")).strip() or local_google_spreadsheet_id()
+
+
+def google_storage(spreadsheet_id: str) -> GoogleSheetsStorage:
+    credentials = google_service_account_credentials()
+    if not credentials:
+        raise StorageError("Missing [google_service_account] credentials in Streamlit secrets.")
+    if not spreadsheet_id.strip():
+        raise StorageError("Google Sheets storage requires a spreadsheet ID.")
+    return GoogleSheetsStorage(
+        GoogleSheetsConfig(spreadsheet_id=spreadsheet_id.strip(), credentials=credentials)
+    )
+
+
+def render_google_sheets_tutorial() -> None:
+    with st.sidebar.expander("Google Sheets setup guide"):
+        st.markdown(
+            """
+            1. In Google Cloud Console, enable **Google Sheets API** and **Google Drive API**.
+            2. Create a **service account**.
+            3. Create and download a **JSON key** for that service account.
+            4. Open your Google Sheet and share it with the service account `client_email` as an editor.
+            5. Copy the spreadsheet ID from the sheet URL and paste it above.
+            6. Upload or paste the downloaded service account JSON below.
+
+            Spreadsheet URL shape:
+
+            `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`
+
+            Required worksheets:
+
+            - `actors`
+            - `scenes`
+
+            If the worksheets do not exist, save to Google Sheets once and the app will create them.
+            """
+        )
+        st.code(
+            """{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "your-private-key-id",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n",
+  "client_email": "your-service-account@your-project.iam.gserviceaccount.com",
+  "client_id": "your-client-id",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/...",
+  "universe_domain": "googleapis.com"
+}""",
+            language="json",
+        )
+
+
 def render_sidebar() -> None:
     project = get_project()
     loaded_actors, loaded_scenes = st.session_state.get("loaded_paths", ("none", "none"))
 
-    st.sidebar.header("Project")
+    st.sidebar.header("Storage")
+    storage_backend = st.sidebar.selectbox(
+        "Storage backend",
+        ["Local JSON", "Google Sheets"],
+        key="storage_backend",
+    )
     st.sidebar.caption(f"Loaded actors: `{loaded_actors}`")
     st.sidebar.caption(f"Loaded scenes: `{loaded_scenes}`")
-
-    if st.sidebar.button("Reload from files", width="stretch"):
-        loaded = load_default_project()
-        set_project(loaded.data)
-        st.session_state.loaded_paths = (str(loaded.actors_path), str(loaded.scenes_path))
-        st.sidebar.success("Reloaded project files.")
-        rerun()
+    sidebar_success = pop_session_value("sidebar_success")
+    if sidebar_success:
+        st.sidebar.success(str(sidebar_success))
 
     try:
         validate_project(project)
@@ -100,10 +331,109 @@ def render_sidebar() -> None:
         can_save = False
         st.sidebar.error(str(exc))
 
-    if st.sidebar.button("Save to data files", disabled=not can_save, width="stretch"):
-        save_project(project, DEFAULT_ACTORS_PATH, DEFAULT_SCENES_PATH)
-        st.session_state.loaded_paths = (str(DEFAULT_ACTORS_PATH), str(DEFAULT_SCENES_PATH))
-        st.sidebar.success("Saved data/actors.json and data/scenes.json.")
+    if storage_backend == "Local JSON":
+        if st.sidebar.button("Load from local JSON", width="stretch"):
+            try:
+                loaded = load_local_project()
+            except DataValidationError as exc:
+                st.sidebar.error(str(exc))
+            else:
+                set_project(loaded, reset_ui_state=True)
+                st.session_state.loaded_paths = (str(LOCAL_ACTORS_PATH), str(LOCAL_SCENES_PATH))
+                st.session_state.sidebar_success = "Loaded local project files."
+                rerun()
+
+        if st.sidebar.button("Save to local JSON", disabled=not can_save, width="stretch"):
+            save_project(project, LOCAL_ACTORS_PATH, LOCAL_SCENES_PATH)
+            st.session_state.loaded_paths = (str(LOCAL_ACTORS_PATH), str(LOCAL_SCENES_PATH))
+            st.sidebar.success("Saved private_data/actors.json and private_data/scenes.json.")
+
+    if storage_backend == "Google Sheets":
+        credentials_present = google_service_account_credentials() is not None
+        spreadsheet_id = st.sidebar.text_input(
+            "Spreadsheet ID",
+            value=st.session_state.get("google_spreadsheet_id", default_google_spreadsheet_id()),
+            key="google_spreadsheet_id",
+            help=(
+                "Copy the ID from a Google Sheet URL like "
+                "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit. "
+                "Share the sheet with the service account client_email as an editor."
+            ),
+        )
+        st.sidebar.caption("Uses worksheets named `actors` and `scenes`.")
+        st.sidebar.caption(f"Credentials: `{google_credentials_source()}`")
+        render_google_sheets_tutorial()
+
+        with st.sidebar.expander("Google credentials"):
+            uploaded_credentials = st.file_uploader(
+                "Service account JSON",
+                type="json",
+                key="google_credentials_file",
+                help=(
+                    "Upload the JSON key downloaded from Google Cloud Console for a service "
+                    "account. The JSON must include type, client_email, private_key, and token_uri."
+                ),
+            )
+            pasted_credentials = st.text_area(
+                "Paste service account JSON",
+                height=120,
+                key="google_credentials_text",
+                help=(
+                    "Paste the complete service account JSON object. Do not paste only the "
+                    "private key. The app validates that type, client_email, and private_key exist."
+                ),
+            )
+            save_for_refresh = st.checkbox(
+                "Save locally for browser refresh",
+                value=True,
+                help=(
+                    "Stores credentials in .streamlit/google_service_account.json and the "
+                    "spreadsheet ID in .streamlit/google_sheets.json. The .streamlit directory "
+                    "is ignored by Git except config.toml."
+                ),
+            )
+            if st.button("Apply Google credentials", width="stretch"):
+                try:
+                    credentials = _parse_credentials_input(uploaded_credentials, pasted_credentials)
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.google_service_account_credentials = credentials
+                    if save_for_refresh:
+                        _save_json_file(LOCAL_GOOGLE_CREDENTIALS_PATH, credentials)
+                        if spreadsheet_id.strip():
+                            remember_google_spreadsheet_id(spreadsheet_id)
+                    st.success("Google credentials applied.")
+                    rerun()
+
+        if not credentials_present:
+            st.sidebar.error("Add Google service account credentials first.")
+
+        google_ready = credentials_present and bool(spreadsheet_id.strip())
+        if st.sidebar.button("Load from Google Sheets", disabled=not google_ready, width="stretch"):
+            try:
+                set_project(google_storage(spreadsheet_id).load_project(), reset_ui_state=True)
+            except (StorageError, DataValidationError, ValueError) as exc:
+                st.sidebar.error(str(exc))
+            else:
+                st.session_state.loaded_paths = ("Google Sheets: actors", "Google Sheets: scenes")
+                remember_google_spreadsheet_id(spreadsheet_id)
+                st.session_state.sidebar_success = "Loaded project from Google Sheets."
+                rerun()
+
+        if st.sidebar.button(
+            "Save to Google Sheets",
+            disabled=not google_ready or not can_save,
+            width="stretch",
+        ):
+            try:
+                google_storage(spreadsheet_id).save_project(project)
+            except (StorageError, DataValidationError, ValueError) as exc:
+                st.sidebar.error(str(exc))
+            else:
+                st.session_state.loaded_paths = ("Google Sheets: actors", "Google Sheets: scenes")
+                remember_google_spreadsheet_id(spreadsheet_id)
+                st.sidebar.success("Saved project to Google Sheets.")
 
     st.sidebar.download_button(
         "Download actors.json",
@@ -145,7 +475,7 @@ def render_actors_tab() -> None:
     st.subheader("Actors")
     add_col, _ = st.columns([1, 2])
     with add_col.form("add_actor"):
-        new_actor = st.text_input("New actor name")
+        new_actor = st.text_input("New actor name", key=project_widget_key("new_actor_name"))
         submitted = st.form_submit_button("Add actor", width="stretch")
         if submitted:
             cleaned = new_actor.strip()
@@ -162,12 +492,16 @@ def render_actors_tab() -> None:
         st.info("Add an actor to start building availability.")
         return
 
-    selected = st.selectbox("Actor", actor_names, key="actor_selector")
+    selected = st.selectbox("Actor", actor_names, key=project_widget_key("actor_selector"))
     used_in = [scene.name for scene in project.scenes if selected in scene.actors]
 
     rename_col, delete_col = st.columns([2, 1])
     with rename_col.form("rename_actor"):
-        updated_name = st.text_input("Actor name", value=selected, key=f"rename_actor_{selected}")
+        updated_name = st.text_input(
+            "Actor name",
+            value=selected,
+            key=project_widget_key(f"rename_actor_{selected}"),
+        )
         renamed = st.form_submit_button("Rename actor", width="stretch")
         if renamed:
             cleaned = updated_name.strip()
@@ -205,7 +539,7 @@ def render_actors_tab() -> None:
             column: st.column_config.CheckboxColumn(column)
             for column in columns
         },
-        key=f"availability_editor_{selected}",
+        key=project_widget_key(f"availability_editor_{selected}"),
     )
     if st.button("Apply availability", width="stretch"):
         project.actors[selected] = [
@@ -241,9 +575,16 @@ def render_scenes_tab() -> None:
 
     with st.form("add_scene"):
         st.markdown("#### Add Scene")
-        name = st.text_input("Scene name")
-        actors = st.multiselect("Actors", actor_names, key="add_scene_actors")
-        duration = st.number_input("Duration slots", min_value=1, max_value=7, value=1, step=1)
+        name = st.text_input("Scene name", key=project_widget_key("add_scene_name"))
+        actors = st.multiselect("Actors", actor_names, key=project_widget_key("add_scene_actors"))
+        duration = st.number_input(
+            "Duration slots",
+            min_value=1,
+            max_value=7,
+            value=1,
+            step=1,
+            key=project_widget_key("add_scene_duration"),
+        )
         submitted = st.form_submit_button("Add scene", width="stretch")
         if submitted:
             cleaned = name.strip()
@@ -265,7 +606,7 @@ def render_scenes_tab() -> None:
 
     st.markdown("#### Edit Scene")
     scene_names = [scene.name for scene in project.scenes]
-    selected_name = st.selectbox("Scene", scene_names, key="scene_selector")
+    selected_name = st.selectbox("Scene", scene_names, key=project_widget_key("scene_selector"))
     selected_index = scene_names.index(selected_name)
     selected_scene = project.scenes[selected_index]
 
@@ -273,13 +614,13 @@ def render_scenes_tab() -> None:
         edited_name = st.text_input(
             "Scene name",
             value=selected_scene.name,
-            key=f"edit_scene_name_{selected_name}",
+            key=project_widget_key(f"edit_scene_name_{selected_name}"),
         )
         edited_actors = st.multiselect(
             "Actors",
             actor_names,
             default=list(selected_scene.actors),
-            key=f"edit_scene_actors_{selected_name}",
+            key=project_widget_key(f"edit_scene_actors_{selected_name}"),
         )
         edited_duration = st.number_input(
             "Duration slots",
@@ -287,7 +628,7 @@ def render_scenes_tab() -> None:
             max_value=7,
             value=selected_scene.duration_slots,
             step=1,
-            key=f"edit_scene_duration_{selected_name}",
+            key=project_widget_key(f"edit_scene_duration_{selected_name}"),
         )
         saved = st.form_submit_button("Save scene", width="stretch")
         if saved:
@@ -383,11 +724,11 @@ def render_json_tab() -> None:
             try:
                 actors_payload = json.loads(actors_file.getvalue().decode("utf-8"))
                 scenes_payload = json.loads(scenes_file.getvalue().decode("utf-8"))
-                set_project(parse_project_payloads(actors_payload, scenes_payload))
+                set_project(parse_project_payloads(actors_payload, scenes_payload), reset_ui_state=True)
             except (UnicodeDecodeError, json.JSONDecodeError, DataValidationError) as exc:
                 st.error(f"Import failed: {exc}")
             else:
-                st.success("Imported project JSON.")
+                st.session_state.main_success = "Imported project JSON."
                 rerun()
 
     view_col1, view_col2 = st.columns(2)
@@ -413,6 +754,9 @@ def main() -> None:
     load_error = st.session_state.get("load_error")
     if load_error:
         st.error(load_error)
+    main_success = pop_session_value("main_success")
+    if main_success:
+        st.success(str(main_success))
 
     actors_tab, scenes_tab, results_tab, json_tab = st.tabs(
         ["Actors", "Scenes", "Results", "JSON"]
